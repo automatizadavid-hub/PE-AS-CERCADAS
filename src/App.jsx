@@ -792,7 +792,16 @@ function ImportadorPage({ data }) {
   const readFile = async (file) => {
     setFileName(file.name);
     try {
-      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+      if (!window.XLSX) {
+        await new Promise((resolve, reject) => {
+          const sc = document.createElement("script");
+          sc.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+          sc.onload = resolve;
+          sc.onerror = reject;
+          document.head.appendChild(sc);
+        });
+      }
+      const XLSX = window.XLSX;
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: "array" });
       const sheets = {};

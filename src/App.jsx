@@ -10,6 +10,56 @@ const supabase = createClient(
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxnb3J2dXFsZWhubGp1YXF0bGV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2ODYyNzcsImV4cCI6MjA4OTI2MjI3N30.xnkFU8Eo9-XRnVtiDghlyHi-ENl3cd1Iak1f8x60lLw"
 );
 
+// Helper to call Claude API through our serverless function
+async function askClaude(message, dataContext, chatType = "general") {
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, dataContext, chatType })
+    });
+    const data = await res.json();
+    if (data.error) return "Error: " + data.error;
+    return data.response;
+  } catch (err) {
+    return "Error de conexión. Inténtalo de nuevo.";
+  }
+}
+
+// Build data context string from Supabase data
+function buildDataContext(data) {
+  if (!data) return "";
+  const lines = [];
+  lines.push(`Total cabras: ${data.cabras.length}`);
+  
+  // Lotes with counts
+  const loteCounts = {};
+  data.cabras.forEach(c => {
+    const lote = data.lotes.find(l => l.id === c.lote_id);
+    if (lote) loteCounts[lote.nombre] = (loteCounts[lote.nombre] || 0) + 1;
+  });
+  lines.push("Lotes: " + Object.entries(loteCounts).map(([n, c]) => `${n}: ${c}`).join(", "));
+  
+  lines.push(`Partos registrados: ${data.partos.length}`);
+  lines.push(`Ecografías: ${data.ecografias.length}`);
+  lines.push(`Tratamientos: ${data.tratamientos.length}`);
+  lines.push(`Cubriciones: ${data.cubriciones.length}`);
+  lines.push(`Crías hembra: ${data.crias.length}`);
+  lines.push(`Parideras: ${data.parideras.map(p => p.nombre).join(", ")}`);
+  lines.push(`Reglas activas: ${data.reglas.length}`);
+  
+  // Double vacías
+  const vaciasByC = {};
+  data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
+    const cr = e.cabra?.crotal;
+    if (cr) vaciasByC[cr] = (vaciasByC[cr] || 0) + 1;
+  });
+  const dobleVacias = Object.entries(vaciasByC).filter(([, c]) => c >= 2).map(([cr]) => cr);
+  if (dobleVacias.length > 0) lines.push(`Cabras vacías en 2+ ecografías: ${dobleVacias.join(", ")}`);
+  
+  return lines.join("\n");
+}
+
 // ==========================================
 // LOGIN PAGE
 // ==========================================
@@ -487,10 +537,13 @@ function RentabilidadPage({ data }) {
   const [finMsgs, setFinMsgs] = useState([{ role: "assistant", text: "Soy el asistente financiero. Puedo registrar gastos e ingresos y hacer previsiones. Dime qué necesitas." }]);
   const [tab, setTab] = useState("general");
   const examples = ["He pagado 3.200€ de pienso", "Vendidos 45 cabritos a 38€", "Previsión de ingresos 3 meses", "¿Cuánto cuesta producir un litro?"];
-  const send = () => {
+  const dataCtx = buildDataContext(data);
+  const send = async () => {
     if (!finMsg.trim()) return;
-    setFinMsgs(p => [...p, { role: "user", text: finMsg }]); setFinMsg("");
-    setTimeout(() => setFinMsgs(p => [...p, { role: "assistant", text: "⚡ Cuando conectemos Claude API, aquí responderé con datos reales y registraré gastos/ingresos en Supabase." }]), 1000);
+    const userMsg = finMsg;
+    setFinMsgs(p => [...p, { role: "user", text: userMsg }]); setFinMsg("");
+    const response = await askClaude(userMsg, dataCtx, "finance");
+    setFinMsgs(p => [...p, { role: "assistant", text: response }]);
   };
   const totalCabras = data.cabras.length;
 
@@ -616,11 +669,22 @@ function RentabilidadPage({ data }) {
 // ==========================================
 // IMPORTADOR & CONSULTAS & CONFIG
 // ==========================================
-function ImportadorPage() {
+function ImportadorPage({ data }) {
   const [dO, setDO] = useState(false);
   const [m, setM] = useState("");
-  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un Excel y dime qué contiene. Lo proceso y lo meto en la base de datos." }]);
-  const s = () => { if (!m.trim()) return; setMs(p => [...p, { role: "user", text: m }]); setM(""); setTimeout(() => setMs(p => [...p, { role: "assistant", text: "⚡ Cuando conectemos Claude API, procesaré el Excel automáticamente." }]), 1000); };
+  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un Excel y dime qué contiene. Lo analizo y te digo qué datos he encontrado para importar a Supabase." }]);
+  const [ld, setLd] = useState(false);
+  const dataCtx = buildDataContext(data);
+  const s = async () => { 
+    if (!m.trim()) return; 
+    const userMsg = m;
+    setMs(p => [...p, { role: "user", text: userMsg }]); 
+    setM(""); 
+    setLd(true);
+    const response = await askClaude(userMsg, dataCtx);
+    setMs(p => [...p, { role: "assistant", text: response }]);
+    setLd(false);
+  };
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
       <div>
@@ -645,11 +709,43 @@ function ImportadorPage() {
   );
 }
 
-function ConsultasPage() {
+function ConsultasPage({ data }) {
   const [q, setQ] = useState("");
-  const [ms, setMs] = useState([{ role: "assistant", text: "Pregúntame lo que quieras. Solo datos reales de Supabase, nunca invento." }]);
+  const [ms, setMs] = useState([{ role: "assistant", text: "Pregúntame lo que quieras sobre tu granja. Consulto datos reales de Supabase y nunca invento." }]);
   const [ld, setLd] = useState(false);
-  const send = () => { if (!q.trim()) return; setMs(p => [...p, { role: "user", text: q }]); setQ(""); setLd(true); setTimeout(() => { setMs(p => [...p, { role: "assistant", text: "⚡ Cuando conectemos Claude API, responderé con consultas SQL reales a tu base de datos." }]); setLd(false); }, 1200); };
+  const dataCtx = buildDataContext(data);
+  const send = async () => { 
+    if (!q.trim()) return; 
+    const userMsg = q;
+    setMs(p => [...p, { role: "user", text: userMsg }]); 
+    setQ(""); 
+    setLd(true);
+    
+    // Build specific context if asking about a specific goat
+    let specificCtx = dataCtx;
+    const crotalMatch = userMsg.match(/\b(\d{5,6})\b/);
+    if (crotalMatch) {
+      const crotal = crotalMatch[1];
+      const cabra = data.cabras.find(c => c.crotal === crotal);
+      const partosC = data.partos.filter(p => p.cabra?.crotal === crotal);
+      const ecosC = data.ecografias.filter(e => e.cabra?.crotal === crotal);
+      const tratsC = data.tratamientos.filter(t => t.cabra?.crotal === crotal);
+      const cubsC = data.cubriciones.filter(c => c.cabra?.crotal === crotal);
+      const criasC = data.crias.filter(c => c.madre?.crotal === crotal);
+      specificCtx += `\n\nDATOS ESPECÍFICOS DE CABRA ${crotal}:`;
+      if (cabra) specificCtx += `\nEstado: ${cabra.estado}, Lote: ${cabra.lote?.nombre || '-'}, Lactaciones: ${cabra.num_lactaciones || '-'}, DEL: ${cabra.dias_en_leche || '-'}, Edad meses: ${cabra.edad_meses || '-'}, Estado gine: ${cabra.estado_ginecologico || '-'}`;
+      if (partosC.length > 0) specificCtx += `\nPartos (${partosC.length}): ${partosC.map(p => `${p.fecha} - ${p.num_crias} crías (${p.num_machos}M ${p.num_hembras}H) ${p.tipo}`).join('; ')}`;
+      if (ecosC.length > 0) specificCtx += `\nEcografías (${ecosC.length}): ${ecosC.map(e => `${e.fecha} - ${e.resultado} (${e.paridera?.nombre || '-'})`).join('; ')}`;
+      if (tratsC.length > 0) specificCtx += `\nTratamientos (${tratsC.length}): ${tratsC.map(t => `${t.fecha} - ${t.tipo} ${t.producto || ''}`).join('; ')}`;
+      if (cubsC.length > 0) specificCtx += `\nCubriciones (${cubsC.length}): ${cubsC.map(c => `${c.fecha_entrada} - ${c.metodo} (${c.paridera?.nombre || '-'})`).join('; ')}`;
+      if (criasC.length > 0) specificCtx += `\nCrías hembra: ${criasC.map(c => `peseta ${c.peseta} (${c.fecha_nacimiento})`).join(', ')}`;
+      if (!cabra) specificCtx += `\nEsta cabra NO existe en el sistema.`;
+    }
+    
+    const response = await askClaude(userMsg, specificCtx);
+    setMs(p => [...p, { role: "assistant", text: response }]);
+    setLd(false);
+  };
   const exs = ["Dime las 40 mejores cabras", "¿Qué cabras han salido vacías dos veces?", "Ficha de la cabra 057997", "Cabras del Lote 3 sin vacuna", "Resumen paridera febrero", "Candidatas a cubrición anticipada"];
   return (
     <div style={{ display: "flex", gap: 20, height: "calc(100vh - 155px)" }}>
@@ -823,8 +919,8 @@ export default function App() {
         </div>
         {page === "dashboard" && <DashboardPage data={data} />}
         {page === "rentabilidad" && <RentabilidadPage data={data} />}
-        {page === "importador" && <ImportadorPage />}
-        {page === "consultas" && <ConsultasPage />}
+        {page === "importador" && <ImportadorPage data={data} />}
+        {page === "consultas" && <ConsultasPage data={data} />}
         {page === "config" && <ConfigPage data={data} />}
       </div>
     </div>

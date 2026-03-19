@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Legend } from "recharts";
 
@@ -782,28 +782,104 @@ function RentabilidadPage({ data }) {
 function ImportadorPage({ data }) {
   const [dO, setDO] = useState(false);
   const [m, setM] = useState("");
-  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un Excel y dime qué contiene. Lo analizo y te digo qué datos he encontrado para importar a Supabase." }]);
+  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un Excel y dime qué contiene. Lo analizo y te digo qué datos he encontrado. También puedes escribirme directamente sin subir archivo — por ejemplo: 'Se ha muerto la cabra 057600' o 'Cambia la 056749 al Lote 4'." }]);
   const [ld, setLd] = useState(false);
+  const [fileName, setFileName] = useState(null);
+  const [fileData, setFileData] = useState(null);
+  const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
+
+  const readFile = async (file) => {
+    setFileName(file.name);
+    try {
+      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const sheets = {};
+      wb.SheetNames.forEach(name => {
+        const ws = wb.Sheets[name];
+        const json = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        sheets[name] = json.slice(0, 50); // First 50 rows
+      });
+      setFileData(sheets);
+      
+      // Auto-send to chat
+      const sheetName = wb.SheetNames[0];
+      const rows = sheets[sheetName];
+      const preview = rows.slice(0, 15).map(r => r.join(" | ")).join("\n");
+      const summary = `He subido el archivo "${file.name}" con ${rows.length} filas.\n\nPrimeras filas:\n${preview}`;
+      
+      setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${rows.length} filas)` }]);
+      setLd(true);
+      const response = await askClaude(
+        `El usuario ha subido un archivo Excel llamado "${file.name}". Aquí están las primeras filas:\n\n${preview}\n\nTotal filas: ${rows.length}\n\nAnaliza el contenido, identifica qué tipo de datos son (ecografías, tratamientos, producción, paridera, cubriciones, etc.) y explica qué has encontrado. Sugiere qué acción tomar para importarlo.`,
+        dataCtx
+      );
+      setMs(p => [...p, { role: "assistant", text: response }]);
+      setLd(false);
+    } catch (err) {
+      setMs(p => [...p, { role: "assistant", text: `Error leyendo el archivo: ${err.message}. Asegúrate de que es un archivo Excel (.xlsx).` }]);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault(); setDO(false);
+    const file = e.dataTransfer.files[0];
+    if (file) readFile(file);
+  };
+
+  const handleClick = () => { fileRef.current?.click(); };
+  const handleFileChange = (e) => { const file = e.target.files[0]; if (file) readFile(file); };
+
   const s = async () => { 
     if (!m.trim()) return; 
     const userMsg = m;
     setMs(p => [...p, { role: "user", text: userMsg }]); 
     setM(""); 
     setLd(true);
-    const response = await askClaude(userMsg, dataCtx);
+    
+    let ctx = dataCtx;
+    if (fileData) {
+      const sheetName = Object.keys(fileData)[0];
+      const rows = fileData[sheetName];
+      const preview = rows.slice(0, 20).map(r => r.join(" | ")).join("\n");
+      ctx += `\n\nARCHIVO SUBIDO: ${fileName}\nContenido (primeras 20 filas):\n${preview}`;
+    }
+    
+    const response = await askClaude(userMsg, ctx);
     setMs(p => [...p, { role: "assistant", text: response }]);
     setLd(false);
   };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
       <div>
         <SectionTitle icon="📁" text="Subir Excel" />
-        <div style={{ border: `2px dashed ${dO ? "#E8950A" : "#E2E8F0"}`, borderRadius: 16, padding: "42px 28px", textAlign: "center", background: dO ? "#FEF9EE" : "#FAFAFA", cursor: "pointer" }}
-          onDragOver={e => { e.preventDefault(); setDO(true); }} onDragLeave={() => setDO(false)} onDrop={e => { e.preventDefault(); setDO(false); }}>
-          <div style={{ fontSize: 42, marginBottom: 12 }}>📎</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>Arrastra el Excel aquí</div>
-          <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 4 }}>o haz clic para seleccionar</div>
+        <input type="file" ref={fileRef} onChange={handleFileChange} accept=".xlsx,.xls,.csv" style={{ display: "none" }} />
+        <div 
+          onClick={handleClick}
+          onDragOver={e => { e.preventDefault(); setDO(true); }} 
+          onDragLeave={() => setDO(false)} 
+          onDrop={handleDrop}
+          style={{ 
+            border: `2px dashed ${dO ? "#E8950A" : fileName ? "#059669" : "#E2E8F0"}`, 
+            borderRadius: 16, padding: "42px 28px", textAlign: "center", 
+            background: dO ? "#FEF9EE" : fileName ? "#F0FDF4" : "#FAFAFA", 
+            cursor: "pointer", transition: "all .3s" 
+          }}>
+          {fileName ? (
+            <>
+              <div style={{ fontSize: 42, marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#059669" }}>{fileName}</div>
+              <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 4 }}>Archivo cargado — haz clic para cambiar</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 42, marginBottom: 12 }}>📎</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>Arrastra el Excel aquí</div>
+              <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 4 }}>o haz clic para seleccionar archivo</div>
+            </>
+          )}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 14 }}>
           {[{ i: "📊", n: "Producción" }, { i: "🔬", n: "Ecografías" }, { i: "💉", n: "Tratamientos" }, { i: "🐣", n: "Paridera" }, { i: "🐐", n: "Cubriciones" }, { i: "📋", n: "Otro" }].map((t, j) =>
@@ -813,8 +889,35 @@ function ImportadorPage({ data }) {
             </div>
           )}
         </div>
+
+        {fileData && (
+          <Card style={{ marginTop: 14 }}>
+            <SectionTitle icon="📋" text="Vista previa del archivo" />
+            <div style={{ overflow: "auto", maxHeight: 200 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <tbody>
+                  {Object.values(fileData)[0].slice(0, 10).map((row, i) => (
+                    <tr key={i}>
+                      {row.map((cell, j) => (
+                        <td key={j} style={{ padding: "4px 8px", borderBottom: "1px solid #F1F5F9", color: "#475569", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
+                          {String(cell).substring(0, 20)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>
+              Mostrando las primeras 10 filas · {Object.values(fileData)[0].length} filas en total
+            </div>
+          </Card>
+        )}
       </div>
-      <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho..." height={470} />
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho..." height={fileName ? 350 : 470} />
+        {ld && <div style={{ textAlign: "center", padding: 12, fontSize: 13, color: "#E8950A" }}>Analizando...</div>}
+      </div>
     </div>
   );
 }

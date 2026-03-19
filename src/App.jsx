@@ -184,34 +184,86 @@ function KPI({ icon, label, value, sub, accent, onClick }) {
     </div>
   );
 }
-function DataModal({ title, icon, accent, data, columns, onClose, searchPH }) {
+function DataModal({ title, icon, accent, data, columns, onClose, searchPH, folders }) {
   const [s, setS] = useState("");
-  const f = data.filter(r => Object.values(r).some(v => String(v || "").toLowerCase().includes(s.toLowerCase())));
+  const [activeFolder, setActiveFolder] = useState(folders ? null : "__all__");
+  
+  const currentData = activeFolder === "__all__" ? data : 
+    folders ? data.filter(r => r.__folder === activeFolder) : data;
+  const f = currentData.filter(r => Object.values(r).some(v => String(v || "").toLowerCase().includes(s.toLowerCase())));
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.25)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn .2s" }} onClick={onClose}>
-      <div style={{ background: "#FFF", borderRadius: 20, width: "88%", maxWidth: 950, maxHeight: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.12)", animation: "slideUp .3s" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: "#FFF", borderRadius: 20, width: "90%", maxWidth: 1000, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.12)", animation: "slideUp .3s" }} onClick={e => e.stopPropagation()}>
+        {/* Header */}
         <div style={{ padding: "18px 26px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
             <div style={{ width: 38, height: 38, borderRadius: 11, background: `${accent}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{icon}</div>
-            <div><div style={{ fontSize: 16, fontWeight: 700, color: "#1E293B" }}>{title}</div><div style={{ fontSize: 12, color: "#94A3B8" }}>{f.length} registros</div></div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: "#1E293B" }}>{title}</span>
+                {activeFolder && activeFolder !== "__all__" && (
+                  <span style={{ fontSize: 13, color: "#94A3B8" }}>› {activeFolder}</span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, color: "#94A3B8" }}>{activeFolder ? `${f.length} registros` : `${folders.length} carpetas`}</div>
+            </div>
           </div>
-          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 17, color: "#94A3B8", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-        </div>
-        <div style={{ padding: "14px 26px", borderBottom: "1px solid #F1F5F9" }}>
-          <div style={{ position: "relative" }}>
-            <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 15 }}>🔍</span>
-            <input value={s} onChange={e => setS(e.target.value)} placeholder={searchPH || "Buscar..."} style={{ width: "100%", padding: "11px 15px 11px 40px", borderRadius: 11, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#F8FAFC", boxSizing: "border-box" }} onFocus={e => e.target.style.borderColor = accent} onBlur={e => e.target.style.borderColor = "#E2E8F0"} />
+          <div style={{ display: "flex", gap: 8 }}>
+            {activeFolder && folders && (
+              <button onClick={() => { setActiveFolder(null); setS(""); }} style={{ padding: "7px 14px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 12, color: "#64748B", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+                ← Volver
+              </button>
+            )}
+            <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 17, color: "#94A3B8", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
           </div>
         </div>
-        <div style={{ flex: 1, overflow: "auto", padding: "0 26px 18px" }}>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 3px", marginTop: 6 }}>
-            <thead><tr>{columns.map((c, i) => <th key={i} style={{ textAlign: "left", padding: "9px 13px", fontSize: 10.5, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: ".06em", position: "sticky", top: 0, background: "#FFF" }}>{c.label}</th>)}</tr></thead>
-            <tbody>{f.slice(0, 200).map((r, i) => <tr key={i} onMouseEnter={e => e.currentTarget.style.background = "#F8FAFC"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              {columns.map((c, j) => <td key={j} style={{ padding: "10px 13px", fontSize: 13, color: "#334155", fontFamily: c.mono ? "'Space Mono', monospace" : "'Outfit', sans-serif", fontWeight: c.bold ? 700 : 400, borderBottom: "1px solid #F5F7FA" }}>{c.render ? c.render(r[c.key], r) : (r[c.key] ?? "-")}</td>)}
-            </tr>)}</tbody>
-          </table>
-          {f.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#94A3B8" }}>No se encontraron resultados</div>}
-        </div>
+
+        {/* Folder view */}
+        {!activeFolder && folders && (
+          <div style={{ flex: 1, overflow: "auto", padding: "20px 26px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+              {folders.map((folder, i) => (
+                <div key={i} onClick={() => setActiveFolder(folder.name)}
+                  style={{
+                    background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 14,
+                    padding: "20px", cursor: "pointer", transition: "all .2s",
+                    display: "flex", alignItems: "center", gap: 14,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}50`; e.currentTarget.style.background = `${accent}06`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 16px ${accent}12`; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.background = "#FAFAFA"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
+                >
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+                    📁
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>{folder.name}</div>
+                    <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{folder.count} registros</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Data view */}
+        {activeFolder && <>
+          <div style={{ padding: "14px 26px", borderBottom: "1px solid #F1F5F9" }}>
+            <div style={{ position: "relative" }}>
+              <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 15 }}>🔍</span>
+              <input value={s} onChange={e => setS(e.target.value)} placeholder={searchPH || "Buscar..."} style={{ width: "100%", padding: "11px 15px 11px 40px", borderRadius: 11, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#F8FAFC", boxSizing: "border-box" }} onFocus={e => e.target.style.borderColor = accent} onBlur={e => e.target.style.borderColor = "#E2E8F0"} />
+            </div>
+          </div>
+          <div style={{ flex: 1, overflow: "auto", padding: "0 26px 18px" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 3px", marginTop: 6 }}>
+              <thead><tr>{columns.map((c, i) => <th key={i} style={{ textAlign: "left", padding: "9px 13px", fontSize: 10.5, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: ".06em", position: "sticky", top: 0, background: "#FFF" }}>{c.label}</th>)}</tr></thead>
+              <tbody>{f.slice(0, 300).map((r, i) => <tr key={i} onMouseEnter={e => e.currentTarget.style.background = "#F8FAFC"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                {columns.map((c, j) => <td key={j} style={{ padding: "10px 13px", fontSize: 13, color: "#334155", fontFamily: c.mono ? "'Space Mono', monospace" : "'Outfit', sans-serif", fontWeight: c.bold ? 700 : 400, borderBottom: "1px solid #F5F7FA" }}>{c.render ? c.render(r[c.key], r) : (r[c.key] ?? "-")}</td>)}
+              </tr>)}</tbody>
+            </table>
+            {f.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#94A3B8" }}>No se encontraron resultados</div>}
+          </div>
+        </>}
       </div>
     </div>
   );
@@ -407,7 +459,7 @@ function DashboardPage({ data }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-        <KPI icon="🐐" label="Cabras" value={totalCabras} sub={`en ${lotesSorted.length} lotes`} accent="#E8950A" />
+        <KPI icon="🐐" label="Cabras" value={totalCabras} sub={`en ${lotesSorted.length} lotes`} accent="#E8950A" onClick={() => setModal("cabras")} />
         <KPI icon="🍼" label="Partos" value={data.partos.length} sub="registrados" accent="#059669" onClick={() => setModal("partos")} />
         <KPI icon="🔬" label="Ecografías" value={data.ecografias.length} sub={`${dobleVacias.length} doble vacías`} accent="#7C3AED" onClick={() => setModal("eco")} />
         <KPI icon="💉" label="Tratamientos" value={data.tratamientos.length} sub="registrados" accent="#0891B2" onClick={() => setModal("trat")} />
@@ -497,11 +549,70 @@ function DashboardPage({ data }) {
         </div>
       </div>}
 
-      {modal === "partos" && <DataModal title="Partos" icon="🍼" accent="#059669" data={partosModal} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo, paridera..." />}
-      {modal === "eco" && <DataModal title="Ecografías" icon="🔬" accent="#7C3AED" data={ecosModal} columns={ecoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." />}
-      {modal === "trat" && <DataModal title="Tratamientos" icon="💉" accent="#0891B2" data={tratsModal} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." />}
-      {modal === "cubs" && <DataModal title="Cubriciones" icon="🔗" accent="#EA580C" data={cubsModal} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal, método..." />}
-      {modal === "crias" && <DataModal title="Crías Hembra" icon="🐣" accent="#DB2777" data={criasModal} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." />}
+      {modal === "cabras" && (() => {
+        const cabrasModal = data.cabras.map(c => {
+          const lote = data.lotes.find(l => l.id === c.lote_id);
+          const loteName = lote?.nombre || "Sin lote";
+          const promedio = (c.dias_en_leche && c.dias_en_leche > 0) ? ((c.dias_en_leche * 2.2) / c.dias_en_leche).toFixed(1) : "-";
+          return {
+            crotal: c.crotal,
+            edad: c.edad_meses ? `${Math.round(c.edad_meses)} m` : "-",
+            lactaciones: c.num_lactaciones ?? "-",
+            del: c.dias_en_leche ?? "-",
+            estado: c.estado || "-",
+            estado_gine: c.estado_ginecologico || "-",
+            lote: loteName,
+            __folder: loteName,
+          };
+        });
+        const cabraFolders = [...new Set(cabrasModal.map(c => c.__folder))].map(f => ({
+          name: f,
+          count: cabrasModal.filter(c => c.__folder === f).length,
+        })).sort((a, b) => b.count - a.count);
+        const cabraCols = [
+          { key: "crotal", label: "Crotal", mono: true, bold: true },
+          { key: "edad", label: "Edad", mono: true },
+          { key: "lactaciones", label: "Lact.", mono: true },
+          { key: "del", label: "DEL", mono: true },
+          { key: "estado", label: "Estado", render: v => <Badge text={v} color={v === "lactacion" ? "#059669" : v === "gestante" ? "#7C3AED" : v === "cubricion" ? "#EA580C" : v === "preparto" ? "#DB2777" : "#94A3B8"} /> },
+          { key: "estado_gine", label: "Est. Gine." },
+        ];
+        return <DataModal title="Cabras" icon="🐐" accent="#E8950A" data={cabrasModal} columns={cabraCols} onClose={() => setModal(null)} searchPH="Buscar crotal, estado, lote..." folders={cabraFolders} />;
+      })()}
+
+      {modal === "partos" && (() => {
+        const d = partosModal.map(p => ({ ...p, __folder: p.paridera || "Sin paridera" }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title="Partos" icon="🍼" accent="#059669" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+      })()}
+
+      {modal === "eco" && (() => {
+        const d = ecosModal.map(e => ({ ...e, __folder: e.paridera || "Sin paridera" }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title="Ecografías" icon="🔬" accent="#7C3AED" data={d} columns={ecoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} />;
+      })()}
+
+      {modal === "trat" && (() => {
+        const d = tratsModal.map(t => ({ ...t, __folder: t.tipo || "Sin tipo" }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title="Tratamientos" icon="💉" accent="#0891B2" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+      })()}
+
+      {modal === "cubs" && (() => {
+        const d = cubsModal.map(c => ({ ...c, __folder: c.paridera || "Sin paridera" }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title="Cubriciones" icon="🔗" accent="#EA580C" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal, método..." folders={folders} />;
+      })()}
+
+      {modal === "crias" && (() => {
+        const d = criasModal.map(c => {
+          const parto = data.partos.find(p => data.crias.find(cr => cr.madre?.crotal === c.madre && cr.peseta == c.peseta)?.parto_id === p.id);
+          const parideraName = parto?.paridera?.nombre || "Paridera Febrero 2026";
+          return { ...c, __folder: parideraName };
+        });
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title="Crías Hembra" icon="🐣" accent="#DB2777" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
+      })()}
     </div>
   );
 }

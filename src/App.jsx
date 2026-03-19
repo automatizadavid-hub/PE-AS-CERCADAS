@@ -894,6 +894,9 @@ function ConfigPage({ data, refresh }) {
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [newEvt, setNewEvt] = useState({ titulo: "", fecha: "", tipo: "general", descripcion: "", urgente: false });
+  const [editProto, setEditProto] = useState(null);
+  const [showAddProto, setShowAddProto] = useState(false);
+  const [newProto, setNewProto] = useState({ fase: "preparto", momento: "", tratamiento: "", producto: "", dosis: "", destino_animal: "todos", dias_desde_nacimiento: "", notas: "" });
   const dataCtx = buildDataContext(data);
   
   const eventosCtx = (data.eventos || []).map(e => `- ${e.fecha}: ${e.titulo} (${e.tipo}${e.urgente ? ', URGENTE' : ''}${e.completado ? ', COMPLETADO' : ''})`).join('\n');
@@ -931,6 +934,34 @@ function ConfigPage({ data, refresh }) {
 
   const deleteEvent = async (id) => {
     await supabase.from("evento_calendario").delete().eq("id", id);
+    refresh();
+  };
+
+  const saveProto = async () => {
+    if (!newProto.tratamiento || !newProto.fase) return;
+    const row = {
+      fase: newProto.fase, momento: newProto.momento, tratamiento: newProto.tratamiento,
+      producto: newProto.producto, dosis: newProto.dosis, destino_animal: newProto.destino_animal,
+      dias_desde_nacimiento: newProto.dias_desde_nacimiento ? parseInt(newProto.dias_desde_nacimiento) : null,
+      notas: newProto.notas, obligatorio: true, activo: true,
+    };
+    const { error } = await supabase.from("protocolo_veterinario").insert([row]);
+    if (!error) {
+      setNewProto({ fase: "preparto", momento: "", tratamiento: "", producto: "", dosis: "", destino_animal: "todos", dias_desde_nacimiento: "", notas: "" });
+      setShowAddProto(false);
+      refresh();
+    }
+  };
+
+  const updateProto = async () => {
+    if (!editProto || !editProto.tratamiento) return;
+    const { id, created_at, ...updates } = editProto;
+    const { error } = await supabase.from("protocolo_veterinario").update(updates).eq("id", id);
+    if (!error) { setEditProto(null); refresh(); }
+  };
+
+  const deleteProto = async (id) => {
+    await supabase.from("protocolo_veterinario").delete().eq("id", id);
     refresh();
   };
 
@@ -1118,27 +1149,83 @@ function ConfigPage({ data, refresh }) {
         </div>
       )}
 
-      {cfgTab === "protocolo" && (
-        <Card>
-          <SectionTitle icon="🏥" text={`Protocolo Veterinario (${data.protocolos.length} tratamientos)`} />
-          {data.protocolos.length > 0 ? [...new Set(data.protocolos.map(p => p.fase))].map((fase, i) => {
-            const items = data.protocolos.filter(p => p.fase === fase);
-            const cc = { nodriza: "#DB2777", post_destete: "#E8950A", recria: "#0891B2", preparto: "#059669" };
-            return <div key={i} style={{ background: `${cc[fase] || "#64748B"}06`, border: `1px solid ${cc[fase] || "#64748B"}20`, borderRadius: 12, padding: "16px 20px", marginBottom: 10 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: cc[fase] || "#64748B", marginBottom: 10, textTransform: "capitalize" }}>{fase.replace("_", " ")}</div>
-              {items.map((item, j) => (
-                <div key={j} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: j < items.length - 1 ? "1px solid #F1F5F9" : "none" }}>
-                  <div>
-                    <div style={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>{item.tratamiento}</div>
-                    <div style={{ fontSize: 11, color: "#94A3B8" }}>{item.producto} {item.dosis ? `· ${item.dosis}` : ''}</div>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#94A3B8" }}>{item.momento}</div>
+      {cfgTab === "protocolo" && (() => {
+        const cc = { nodriza: "#DB2777", post_destete: "#E8950A", recria: "#0891B2", preparto: "#059669" };
+        const faseLabels = { nodriza: "Nodriza (nacimiento)", post_destete: "Post-destete", recria: "Recría (crotalado)", preparto: "Preparto" };
+        const ProtoForm = ({ values, onChange, onSave, onCancel, saveLabel }) => (
+          <div style={{ background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 12, padding: 18, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <input value={values.tratamiento} onChange={e => onChange({ ...values, tratamiento: e.target.value })} placeholder="Nombre del tratamiento *" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} onFocus={e => e.target.style.borderColor = "#E8950A"} onBlur={e => e.target.style.borderColor = "#E2E8F0"} />
+              <input value={values.producto} onChange={e => onChange({ ...values, producto: e.target.value })} placeholder="Producto (ej: Heptavac Plus)" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <select value={values.fase} onChange={e => onChange({ ...values, fase: e.target.value })} style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", background: "#FFF" }}>
+                <option value="nodriza">Nodriza</option>
+                <option value="post_destete">Post-destete</option>
+                <option value="recria">Recría</option>
+                <option value="preparto">Preparto</option>
+              </select>
+              <input value={values.momento} onChange={e => onChange({ ...values, momento: e.target.value })} placeholder="Cuándo (ej: 3 semanas post destete)" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+              <input value={values.dosis} onChange={e => onChange({ ...values, dosis: e.target.value })} placeholder="Dosis (ej: 2ml subcutánea)" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <select value={values.destino_animal} onChange={e => onChange({ ...values, destino_animal: e.target.value })} style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", background: "#FFF" }}>
+                <option value="todos">Todos los animales</option>
+                <option value="vida">Solo animales para vida</option>
+                <option value="matadero">Solo animales para matadero</option>
+              </select>
+              <input value={values.dias_desde_nacimiento || ""} onChange={e => onChange({ ...values, dias_desde_nacimiento: e.target.value })} placeholder="Días desde nacimiento (ej: 45)" type="number" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+              <input value={values.notas || ""} onChange={e => onChange({ ...values, notas: e.target.value })} placeholder="Notas adicionales" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onSave} style={{ padding: "8px 20px", borderRadius: 9, border: "none", background: "#059669", color: "#FFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{saveLabel || "Guardar"}</button>
+              <button onClick={onCancel} style={{ padding: "8px 20px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#FFF", color: "#64748B", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
+            </div>
+          </div>
+        );
+        
+        return (
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <SectionTitle icon="🏥" text={`Protocolo Veterinario (${data.protocolos.length} tratamientos)`} />
+              <button onClick={() => setShowAddProto(!showAddProto)} style={{
+                padding: "7px 16px", borderRadius: 9, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                background: "linear-gradient(135deg, #E8950A, #CA8106)", color: "#FFF",
+              }}>+ Añadir tratamiento</button>
+            </div>
+
+            {showAddProto && <ProtoForm values={newProto} onChange={setNewProto} onSave={saveProto} onCancel={() => setShowAddProto(false)} saveLabel="Crear tratamiento" />}
+            {editProto && <ProtoForm values={editProto} onChange={setEditProto} onSave={updateProto} onCancel={() => setEditProto(null)} saveLabel="Actualizar" />}
+
+            {data.protocolos.length > 0 ? [...new Set(data.protocolos.map(p => p.fase))].map((fase, i) => {
+              const items = data.protocolos.filter(p => p.fase === fase);
+              return <div key={i} style={{ background: `${cc[fase] || "#64748B"}06`, border: `1px solid ${cc[fase] || "#64748B"}20`, borderRadius: 12, padding: "16px 20px", marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: cc[fase] || "#64748B", textTransform: "capitalize" }}>{faseLabels[fase] || fase.replace("_", " ")}</div>
+                  <span style={{ fontSize: 11, color: "#94A3B8" }}>{items.length} tratamientos</span>
                 </div>
-              ))}
-            </div>;
-          }) : <div style={{ color: "#94A3B8", fontSize: 13 }}>No hay protocolos cargados</div>}
-        </Card>
-      )}
+                {items.map((item, j) => (
+                  <div key={j} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: j < items.length - 1 ? "1px solid #F1F5F9" : "none" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>{item.tratamiento}</div>
+                      <div style={{ fontSize: 11, color: "#94A3B8" }}>
+                        {item.producto && <span>{item.producto}</span>}
+                        {item.dosis && <span> · {item.dosis}</span>}
+                        {item.momento && <span> · {item.momento}</span>}
+                        {item.destino_animal && item.destino_animal !== "todos" && <span> · Solo {item.destino_animal}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => { setEditProto({ ...item }); setShowAddProto(false); }} title="Editar" style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>✏️</button>
+                      <button onClick={() => deleteProto(item.id)} title="Eliminar" style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid #FECACA", background: "#FEF2F2", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                    </div>
+                  </div>
+                ))}
+              </div>;
+            }) : <div style={{ color: "#94A3B8", fontSize: 13, textAlign: "center", padding: 20 }}>No hay protocolos cargados. Añade el primero.</div>}
+          </Card>
+        );
+      })()}
 
       {cfgTab === "parametros" && (
         <Card>

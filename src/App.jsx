@@ -273,6 +273,30 @@ function DashboardPage({ data }) {
   const dobleVacias = Object.entries(vaciasByC).filter(([, c]) => c >= 2).map(([cr]) => cr);
   if (dobleVacias.length > 0) alertas.push({ tipo: "alta", msg: `${dobleVacias.length} cabras vacías en dos o más ecografías`, detalle: dobleVacias.join(", "), icon: "🔴" });
 
+  // More alerts based on farm knowledge
+  const cabrasLote3 = data.cabras.filter(c => c.lote_id && data.lotes.find(l => l.id === c.lote_id && l.nombre.includes("Lote 3")));
+  if (cabrasLote3.length > 0) alertas.push({ tipo: "alta", msg: `Paridera Mayo: vacunar enterotoxemias`, detalle: `${cabrasLote3.length} cabras del Lote 3 necesitan Polibascol antes del parto`, icon: "💉" });
+  if (cabrasLote3.length > 0) alertas.push({ tipo: "alta", msg: `Paridera Mayo: desparasitación pendiente`, detalle: `${cabrasLote3.length} cabras del Lote 3 necesitan desparasitación`, icon: "💊" });
+
+  const cabrasLote6 = data.cabras.filter(c => c.lote_id && data.lotes.find(l => l.id === c.lote_id && l.nombre.includes("Lote 6")));
+  if (cabrasLote6.length > 0) alertas.push({ tipo: "media", msg: `${cabrasLote6.length} cabras en Lote 6 con machos`, detalle: "Machos entraron el 20 de febrero, retirar el 20 de marzo", icon: "📅" });
+
+  if (data.crias.length > 0) alertas.push({ tipo: "media", msg: `${data.crias.length} crías: programar coccidiosis pre-destete`, detalle: "Crías de la paridera de febrero, destete próximamente", icon: "🐐" });
+
+  const inseminaciones = data.cubriciones.filter(c => c.metodo === "inseminacion");
+  if (inseminaciones.length > 0) alertas.push({ tipo: "info", msg: `${inseminaciones.length} inseminaciones pendientes de seguimiento`, detalle: "Verificar resultados en próxima ecografía", icon: "📋" });
+
+  // Calendario
+  const calendario = [
+    { fecha: "20 Mar 2026", evento: "Retirar machos Lote 6", tipo: "cubricion", urgente: true },
+    { fecha: "09 Abr 2026", evento: "Vacunar enterotoxemias Lote 3", tipo: "sanidad", urgente: true },
+    { fecha: "09 Abr 2026", evento: "Desparasitación Lote 3", tipo: "sanidad", urgente: true },
+    { fecha: "26 Abr 2026", evento: "Ecografías Paridera Octubre", tipo: "ecografia", urgente: false },
+    { fecha: "May 2026", evento: "Inicio partos Paridera Mayo", tipo: "parto", urgente: false },
+    { fecha: "15 May 2026", evento: "Entrada machos nueva paridera", tipo: "cubricion", urgente: false },
+    { fecha: "Jun 2026", evento: "Crotalado crías paridera feb", tipo: "identificacion", urgente: false },
+  ];
+
   // Parideras info
   const parideraCards = data.parideras.map(p => {
     const now = new Date();
@@ -356,6 +380,19 @@ function DashboardPage({ data }) {
         </Card>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <Card>
+            <SectionTitle icon="📅" text="Próximos Eventos" color="#0891B2" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {calendario.map((c, i) => {
+                const col = { cubricion: "#EA580C", sanidad: "#DC2626", ecografia: "#7C3AED", parto: "#059669", identificacion: "#0891B2" }[c.tipo];
+                return <div key={i} style={{ display: "flex", gap: 11, alignItems: "center", padding: "9px 13px", borderRadius: 9, background: c.urgente ? "#FEF2F2" : "#FAFAFA", border: `1px solid ${c.urgente ? "#FECACA" : "#F1F5F9"}` }}>
+                  <div style={{ width: 3.5, height: 30, borderRadius: 2, background: col, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}><div style={{ fontSize: 12.5, fontWeight: 600, color: "#1E293B" }}>{c.evento}</div><div style={{ fontSize: 11, color: "#94A3B8" }}>{c.fecha}</div></div>
+                  {c.urgente && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 5, background: "#FEE2E2", color: "#DC2626", fontWeight: 700 }}>URGENTE</span>}
+                </div>;
+              })}
+            </div>
+          </Card>
           <Card>
             <SectionTitle icon="📊" text={`Distribución por Lotes (${totalCabras} cabras)`} />
             {lotesSorted.map((l, i) => {
@@ -456,6 +493,14 @@ function RentabilidadPage({ data }) {
     setTimeout(() => setFinMsgs(p => [...p, { role: "assistant", text: "⚡ Cuando conectemos Claude API, aquí responderé con datos reales y registraré gastos/ingresos en Supabase." }]), 1000);
   };
   const totalCabras = data.cabras.length;
+
+  // Compute doble vacías for recommendations
+  const vaciasByC = {};
+  data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
+    const cr = e.cabra?.crotal;
+    if (cr) vaciasByC[cr] = (vaciasByC[cr] || 0) + 1;
+  });
+  const dobleVacias = Object.entries(vaciasByC).filter(([, c]) => c >= 2).map(([cr]) => cr);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>

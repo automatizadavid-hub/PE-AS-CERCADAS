@@ -112,7 +112,7 @@ function useSupabaseData() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR] = await Promise.all([
+      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR] = await Promise.all([
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre)"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
@@ -124,6 +124,7 @@ function useSupabaseData() {
         supabase.from("paridera").select("*"),
         supabase.from("muerte").select("*, cabra:cabra_id(crotal)"),
         supabase.from("protocolo_veterinario").select("*"),
+        supabase.from("evento_calendario").select("*").order("fecha", { ascending: true }),
       ]);
 
       // Process lotes with counts
@@ -145,6 +146,7 @@ function useSupabaseData() {
         parideras: pariderasR.data || [],
         muertes: muerteR.data || [],
         protocolos: protocoloR.data || [],
+        eventos: eventosR.data || [],
       });
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -388,16 +390,13 @@ function DashboardPage({ data }) {
   const inseminaciones = data.cubriciones.filter(c => c.metodo === "inseminacion");
   if (inseminaciones.length > 0) alertas.push({ tipo: "info", msg: `${inseminaciones.length} inseminaciones pendientes de seguimiento`, detalle: "Verificar resultados en próxima ecografía", icon: "📋" });
 
-  // Calendario
-  const calendario = [
-    { fecha: "20 Mar 2026", evento: "Retirar machos Lote 6", tipo: "cubricion", urgente: true },
-    { fecha: "09 Abr 2026", evento: "Vacunar enterotoxemias Lote 3", tipo: "sanidad", urgente: true },
-    { fecha: "09 Abr 2026", evento: "Desparasitación Lote 3", tipo: "sanidad", urgente: true },
-    { fecha: "26 Abr 2026", evento: "Ecografías Paridera Octubre", tipo: "ecografia", urgente: false },
-    { fecha: "May 2026", evento: "Inicio partos Paridera Mayo", tipo: "parto", urgente: false },
-    { fecha: "15 May 2026", evento: "Entrada machos nueva paridera", tipo: "cubricion", urgente: false },
-    { fecha: "Jun 2026", evento: "Crotalado crías paridera feb", tipo: "identificacion", urgente: false },
-  ];
+  // Calendario from Supabase
+  const calendario = (data.eventos || []).filter(e => !e.completado).slice(0, 8).map(e => ({
+    fecha: new Date(e.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" }),
+    evento: e.titulo,
+    tipo: e.tipo || "general",
+    urgente: e.urgente || false,
+  }));
 
   // Parideras info
   const parideraCards = data.parideras.map(p => {
@@ -887,48 +886,274 @@ function ConsultasPage({ data }) {
   );
 }
 
-function ConfigPage({ data }) {
+function ConfigPage({ data, refresh }) {
+  const [cfgMsg, setCfgMsg] = useState("");
+  const [cfgMsgs, setCfgMsgs] = useState([{ role: "assistant", text: "Soy el asistente de configuración. Puedo ayudarte a programar eventos, modificar fechas, y gestionar el calendario de la granja. Dime qué necesitas — por ejemplo: 'La desparasitación va a ser el 28 de marzo' o 'Añade ecografías del lote 6 para el 26 de abril'." }]);
+  const [cfgTab, setCfgTab] = useState("calendario");
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [newEvt, setNewEvt] = useState({ titulo: "", fecha: "", tipo: "general", descripcion: "", urgente: false });
+  const dataCtx = buildDataContext(data);
+  
+  const eventosCtx = (data.eventos || []).map(e => `- ${e.fecha}: ${e.titulo} (${e.tipo}${e.urgente ? ', URGENTE' : ''}${e.completado ? ', COMPLETADO' : ''})`).join('\n');
+
+  const sendCfg = async () => {
+    if (!cfgMsg.trim()) return;
+    const userMsg = cfgMsg;
+    setCfgMsgs(p => [...p, { role: "user", text: userMsg }]);
+    setCfgMsg("");
+    const ctx = dataCtx + "\n\nEVENTOS ACTUALES DEL CALENDARIO:\n" + eventosCtx + "\n\nIMPORTANTE: Cuando el usuario quiera añadir, modificar o eliminar un evento del calendario, confirma lo que has entendido y dile que lo añada desde el formulario del calendario o que tú lo harás. Sugiere la fecha, el tipo (sanidad/cubricion/ecografia/parto/identificacion/general) y si es urgente.";
+    const response = await askClaude(userMsg, ctx);
+    setCfgMsgs(p => [...p, { role: "assistant", text: response }]);
+  };
+
+  const saveEvent = async () => {
+    if (!newEvt.titulo || !newEvt.fecha) return;
+    const { error } = await supabase.from("evento_calendario").insert([{
+      titulo: newEvt.titulo,
+      fecha: newEvt.fecha,
+      tipo: newEvt.tipo,
+      descripcion: newEvt.descripcion,
+      urgente: newEvt.urgente,
+    }]);
+    if (!error) {
+      setNewEvt({ titulo: "", fecha: "", tipo: "general", descripcion: "", urgente: false });
+      setShowAddEvent(false);
+      refresh();
+    }
+  };
+
+  const toggleComplete = async (id, current) => {
+    await supabase.from("evento_calendario").update({ completado: !current }).eq("id", id);
+    refresh();
+  };
+
+  const deleteEvent = async (id) => {
+    await supabase.from("evento_calendario").delete().eq("id", id);
+    refresh();
+  };
+
+  // Calendar logic
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const firstDayOfWeek = (new Date(calYear, calMonth, 1).getDay() + 6) % 7; // Monday = 0
+  const monthEvents = (data.eventos || []).filter(e => {
+    const d = new Date(e.fecha);
+    return d.getMonth() === calMonth && d.getFullYear() === calYear;
+  });
+  const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const dayNames = ["L", "M", "X", "J", "V", "S", "D"];
+  const tipoColors = { cubricion: "#EA580C", sanidad: "#DC2626", ecografia: "#7C3AED", parto: "#059669", identificacion: "#0891B2", general: "#E8950A" };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        <Card>
-          <SectionTitle icon="📏" text={`Reglas Activas (${data.reglas.length})`} />
-          {(() => {
-            const cats = {};
-            data.reglas.forEach(r => { cats[r.categoria] = (cats[r.categoria] || 0) + 1; });
-            const cc = { sanidad: "#DC2626", reproduccion: "#7C3AED", produccion: "#059669", identificacion: "#0891B2" };
-            return Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, n], i) =>
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #F8FAFC" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ width: 7, height: 7, borderRadius: "50%", background: cc[c] || "#E8950A" }} /><span style={{ fontSize: 12.5, color: "#475569", textTransform: "capitalize" }}>{c}</span></div>
-                <span style={{ fontSize: 12.5, fontWeight: 700, color: cc[c] || "#E8950A", fontFamily: "'Space Mono', monospace" }}>{n}</span>
+      {/* Tab selector */}
+      <div style={{ display: "flex", gap: 4, background: "#F1F5F9", borderRadius: 12, padding: 4, width: "fit-content" }}>
+        {[{ id: "calendario", l: "📅 Calendario" }, { id: "reglas", l: "📏 Reglas" }, { id: "protocolo", l: "🏥 Protocolo" }, { id: "parametros", l: "⚙️ Parámetros" }].map(t =>
+          <button key={t.id} onClick={() => setCfgTab(t.id)} style={{ padding: "8px 18px", borderRadius: 9, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: cfgTab === t.id ? "#FFF" : "transparent", color: cfgTab === t.id ? "#E8950A" : "#64748B", boxShadow: cfgTab === t.id ? "0 1px 4px rgba(0,0,0,0.06)" : "none" }}>{t.l}</button>
+        )}
+      </div>
+
+      {cfgTab === "calendario" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {/* Calendar Grid */}
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                <button onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 16, color: "#64748B", display: "flex", alignItems: "center", justifyContent: "center" }}>←</button>
+                <div style={{ fontSize: 17, fontWeight: 700, color: "#1E293B" }}>{monthNames[calMonth]} {calYear}</div>
+                <button onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 16, color: "#64748B", display: "flex", alignItems: "center", justifyContent: "center" }}>→</button>
               </div>
-            );
-          })()}
-        </Card>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+                {dayNames.map(d => <div key={d} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: "#94A3B8", padding: "6px 0" }}>{d}</div>)}
+                {Array.from({ length: firstDayOfWeek }).map((_, i) => <div key={`e${i}`} />)}
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                  const day = i + 1;
+                  const dayEvts = monthEvents.filter(e => new Date(e.fecha).getDate() === day);
+                  const isToday = day === new Date().getDate() && calMonth === new Date().getMonth() && calYear === new Date().getFullYear();
+                  return (
+                    <div key={day} style={{
+                      minHeight: 52, padding: "4px 6px", borderRadius: 8, fontSize: 12,
+                      background: isToday ? "#FEF9EE" : dayEvts.length > 0 ? "#FAFAFA" : "transparent",
+                      border: isToday ? "2px solid #E8950A" : "1px solid #F1F5F9",
+                    }}>
+                      <div style={{ fontWeight: isToday ? 700 : 400, color: isToday ? "#E8950A" : "#475569", fontSize: 12 }}>{day}</div>
+                      {dayEvts.map((ev, j) => (
+                        <div key={j} style={{
+                          fontSize: 9, padding: "2px 4px", borderRadius: 4, marginTop: 2,
+                          background: `${tipoColors[ev.tipo] || "#94A3B8"}15`,
+                          color: tipoColors[ev.tipo] || "#94A3B8",
+                          fontWeight: 600, lineHeight: 1.2,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>{ev.titulo}</div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            {/* Events list */}
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <SectionTitle icon="📋" text="Eventos Programados" />
+                <button onClick={() => setShowAddEvent(!showAddEvent)} style={{
+                  padding: "7px 16px", borderRadius: 9, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  background: "linear-gradient(135deg, #E8950A, #CA8106)", color: "#FFF",
+                }}>+ Añadir evento</button>
+              </div>
+
+              {showAddEvent && (
+                <div style={{ background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 12, padding: 18, marginBottom: 16 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                    <input value={newEvt.titulo} onChange={e => setNewEvt({ ...newEvt, titulo: e.target.value })} placeholder="Título del evento" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} onFocus={e => e.target.style.borderColor = "#E8950A"} onBlur={e => e.target.style.borderColor = "#E2E8F0"} />
+                    <input type="date" value={newEvt.fecha} onChange={e => setNewEvt({ ...newEvt, fecha: e.target.value })} style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 10 }}>
+                    <select value={newEvt.tipo} onChange={e => setNewEvt({ ...newEvt, tipo: e.target.value })} style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF" }}>
+                      <option value="general">General</option>
+                      <option value="sanidad">Sanidad</option>
+                      <option value="cubricion">Cubrición</option>
+                      <option value="ecografia">Ecografía</option>
+                      <option value="parto">Parto</option>
+                      <option value="identificacion">Identificación</option>
+                    </select>
+                    <input value={newEvt.descripcion} onChange={e => setNewEvt({ ...newEvt, descripcion: e.target.value })} placeholder="Descripción (opcional)" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#64748B", cursor: "pointer" }}>
+                      <input type="checkbox" checked={newEvt.urgente} onChange={e => setNewEvt({ ...newEvt, urgente: e.target.checked })} /> Urgente
+                    </label>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={saveEvent} style={{ padding: "8px 20px", borderRadius: 9, border: "none", background: "#059669", color: "#FFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Guardar</button>
+                    <button onClick={() => setShowAddEvent(false)} style={{ padding: "8px 20px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#FFF", color: "#64748B", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+
+              {(data.eventos || []).filter(e => !e.completado).map((ev, i) => (
+                <div key={i} style={{
+                  display: "flex", gap: 12, alignItems: "center", padding: "10px 14px", borderRadius: 10, marginBottom: 6,
+                  background: ev.urgente ? "#FEF2F2" : "#FAFAFA",
+                  border: `1px solid ${ev.urgente ? "#FECACA" : "#F1F5F9"}`,
+                }}>
+                  <div style={{ width: 4, height: 34, borderRadius: 2, background: tipoColors[ev.tipo] || "#94A3B8", flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1E293B" }}>{ev.titulo}</div>
+                    <div style={{ fontSize: 11, color: "#94A3B8" }}>
+                      {new Date(ev.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" })}
+                      {ev.descripcion && ` · ${ev.descripcion}`}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {ev.urgente && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 5, background: "#FEE2E2", color: "#DC2626", fontWeight: 700 }}>URGENTE</span>}
+                    <button onClick={() => toggleComplete(ev.id, ev.completado)} title="Marcar completado" style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid #BBF7D0", background: "#F0FDF4", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</button>
+                    <button onClick={() => deleteEvent(ev.id)} title="Eliminar" style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid #FECACA", background: "#FEF2F2", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                  </div>
+                </div>
+              ))}
+
+              {(data.eventos || []).filter(e => e.completado).length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 8, fontWeight: 600 }}>Completados</div>
+                  {(data.eventos || []).filter(e => e.completado).map((ev, i) => (
+                    <div key={i} style={{ display: "flex", gap: 12, alignItems: "center", padding: "8px 14px", borderRadius: 10, marginBottom: 4, background: "#FAFAFA", border: "1px solid #F1F5F9", opacity: 0.6 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "#94A3B8", textDecoration: "line-through" }}>{ev.titulo}</div>
+                      </div>
+                      <button onClick={() => toggleComplete(ev.id, ev.completado)} title="Desmarcar" style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #E2E8F0", background: "#FFF", cursor: "pointer", fontSize: 11 }}>↩</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* Chat */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <ChatBox messages={cfgMsgs} input={cfgMsg} setInput={setCfgMsg} onSend={sendCfg}
+              examples={["La desparasitación es el 28 de marzo", "Mueve las ecografías al 30 de abril", "¿Qué eventos tengo esta semana?"]}
+              onExample={setCfgMsg}
+              placeholder="Gestionar eventos y calendario..."
+              height={520} />
+            <Card style={{ background: "linear-gradient(135deg, #FEF9EE, #FFF7ED)", border: "1px solid #FDE68A" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#E8950A", marginBottom: 8 }}>💡 Cómo usar el calendario</div>
+              <div style={{ fontSize: 11.5, color: "#78590A", lineHeight: 1.5 }}>
+                Puedes añadir eventos con el botón "Añadir" o decírselo al chat. Los eventos aparecen en el dashboard y en el calendario. Marca como completados los que ya hayas hecho.
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {cfgTab === "reglas" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <Card>
+            <SectionTitle icon="📏" text={`Reglas Activas (${data.reglas.length})`} />
+            {(() => {
+              const cats = {};
+              data.reglas.forEach(r => { cats[r.categoria] = (cats[r.categoria] || 0) + 1; });
+              const cc = { sanidad: "#DC2626", reproduccion: "#7C3AED", produccion: "#059669", identificacion: "#0891B2" };
+              return Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, n], i) =>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #F8FAFC" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ width: 7, height: 7, borderRadius: "50%", background: cc[c] || "#E8950A" }} /><span style={{ fontSize: 12.5, color: "#475569", textTransform: "capitalize" }}>{c}</span></div>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: cc[c] || "#E8950A", fontFamily: "'Space Mono', monospace" }}>{n}</span>
+                </div>
+              );
+            })()}
+          </Card>
+          <Card>
+            <SectionTitle icon="📋" text="Detalle de Reglas" />
+            <div style={{ maxHeight: 400, overflow: "auto" }}>
+              {data.reglas.map((r, i) => (
+                <div key={i} style={{ padding: "8px 0", borderBottom: "1px solid #F8FAFC", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, color: "#334155" }}>{r.nombre.replace(/_/g, ' ')}</div>
+                    <div style={{ fontSize: 11, color: "#94A3B8", textTransform: "capitalize" }}>{r.categoria} · {r.tipo}</div>
+                  </div>
+                  <Badge text={r.severidad} color={r.severidad === "alta" ? "#DC2626" : r.severidad === "media" ? "#E8950A" : "#0891B2"} />
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {cfgTab === "protocolo" && (
         <Card>
-          <SectionTitle icon="🏥" text={`Protocolo Veterinario (${data.protocolos.length})`} />
+          <SectionTitle icon="🏥" text={`Protocolo Veterinario (${data.protocolos.length} tratamientos)`} />
           {data.protocolos.length > 0 ? [...new Set(data.protocolos.map(p => p.fase))].map((fase, i) => {
             const items = data.protocolos.filter(p => p.fase === fase);
             const cc = { nodriza: "#DB2777", post_destete: "#E8950A", recria: "#0891B2", preparto: "#059669" };
-            return <div key={i} style={{ background: `${cc[fase] || "#64748B"}08`, border: `1px solid ${cc[fase] || "#64748B"}20`, borderRadius: 10, padding: "12px 15px", marginBottom: 7 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: cc[fase] || "#64748B", marginBottom: 2, textTransform: "capitalize" }}>{fase.replace("_", " ")}</div>
-              <div style={{ fontSize: 11.5, color: "#64748B" }}>{items.map(i => i.tratamiento).join(", ")}</div>
+            return <div key={i} style={{ background: `${cc[fase] || "#64748B"}06`, border: `1px solid ${cc[fase] || "#64748B"}20`, borderRadius: 12, padding: "16px 20px", marginBottom: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: cc[fase] || "#64748B", marginBottom: 10, textTransform: "capitalize" }}>{fase.replace("_", " ")}</div>
+              {items.map((item, j) => (
+                <div key={j} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: j < items.length - 1 ? "1px solid #F1F5F9" : "none" }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>{item.tratamiento}</div>
+                    <div style={{ fontSize: 11, color: "#94A3B8" }}>{item.producto} {item.dosis ? `· ${item.dosis}` : ''}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#94A3B8" }}>{item.momento}</div>
+                </div>
+              ))}
             </div>;
           }) : <div style={{ color: "#94A3B8", fontSize: 13 }}>No hay protocolos cargados</div>}
         </Card>
-      </div>
-      <Card>
-        <SectionTitle icon="⚙️" text="Parámetros de la Granja" />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 11 }}>
-          {[{ p: "Lactación máx", v: "210 días", i: "🥛" }, { p: "Gestación", v: "150 días", i: "🤰" }, { p: "Ecografías", v: "65-80 días", i: "🔬" }, { p: "Secado", v: "90 días gest.", i: "⏸️" }, { p: "Crotalado", v: "2-3 meses", i: "🏷️" }, { p: "Parideras/año", v: "4", i: "📅" }, { p: "Umbral alta", v: ">2 L/día", i: "📈" }, { p: "Raza", v: "M-Granadina", i: "🐐" }].map((x, i) =>
-            <div key={i} style={{ background: "#FAFAFA", border: "1px solid #F1F5F9", borderRadius: 10, padding: 13, textAlign: "center" }}>
-              <div style={{ fontSize: 20, marginBottom: 4 }}>{x.i}</div>
-              <div style={{ fontSize: 10.5, color: "#94A3B8" }}>{x.p}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", fontFamily: "'Space Mono', monospace" }}>{x.v}</div>
-            </div>
-          )}
-        </div>
-      </Card>
+      )}
+
+      {cfgTab === "parametros" && (
+        <Card>
+          <SectionTitle icon="⚙️" text="Parámetros de la Granja" />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 11 }}>
+            {[{ p: "Lactación máx", v: "210 días", i: "🥛" }, { p: "Gestación", v: "150 días", i: "🤰" }, { p: "Ecografías", v: "65-80 días", i: "🔬" }, { p: "Secado", v: "90 días gest.", i: "⏸️" }, { p: "Crotalado", v: "2-3 meses", i: "🏷️" }, { p: "Parideras/año", v: "4", i: "📅" }, { p: "Umbral alta", v: ">2 L/día", i: "📈" }, { p: "Raza", v: "M-Granadina", i: "🐐" }].map((x, i) =>
+              <div key={i} style={{ background: "#FAFAFA", border: "1px solid #F1F5F9", borderRadius: 10, padding: 13, textAlign: "center" }}>
+                <div style={{ fontSize: 20, marginBottom: 4 }}>{x.i}</div>
+                <div style={{ fontSize: 10.5, color: "#94A3B8" }}>{x.p}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", fontFamily: "'Space Mono', monospace" }}>{x.v}</div>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -1032,7 +1257,7 @@ export default function App() {
         {page === "rentabilidad" && <RentabilidadPage data={data} />}
         {page === "importador" && <ImportadorPage data={data} />}
         {page === "consultas" && <ConsultasPage data={data} />}
-        {page === "config" && <ConfigPage data={data} />}
+        {page === "config" && <ConfigPage data={data} refresh={refresh} />}
       </div>
     </div>
   );

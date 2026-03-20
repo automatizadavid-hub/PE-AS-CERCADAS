@@ -48,6 +48,15 @@ function buildDataContext(data) {
   lines.push(`Parideras: ${data.parideras.map(p => p.nombre).join(", ")}`);
   lines.push(`Reglas activas: ${data.reglas.length}`);
   
+  // Production data
+  if (data.resumenes && data.resumenes.length > 0) {
+    const last = data.resumenes[0];
+    lines.push(`\nÚltimo informe producción: ${last.fecha}`);
+    lines.push(`Litros totales ese día: ${last.litros_totales}`);
+    lines.push(`Media por cabra: ${last.media_litros} L`);
+    lines.push(`Cabras con conductividad alta: ${last.cabras_alta_conductividad || 0}`);
+  }
+  
   // Double vacías
   const vaciasByC = {};
   data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
@@ -112,7 +121,7 @@ function useSupabaseData() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR] = await Promise.all([
+      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR] = await Promise.all([
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre)"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
@@ -125,6 +134,8 @@ function useSupabaseData() {
         supabase.from("muerte").select("*, cabra:cabra_id(crotal)"),
         supabase.from("protocolo_veterinario").select("*"),
         supabase.from("evento_calendario").select("*").order("fecha", { ascending: true }),
+        supabase.from("produccion_leche").select("*").order("fecha", { ascending: false }).limit(600),
+        supabase.from("resumen_diario").select("*").order("fecha", { ascending: false }).limit(30),
       ]);
 
       // Process lotes with counts
@@ -147,6 +158,8 @@ function useSupabaseData() {
         muertes: muerteR.data || [],
         protocolos: protocoloR.data || [],
         eventos: eventosR.data || [],
+        produccion: produccionR.data || [],
+        resumenes: resumenR.data || [],
       });
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -779,137 +792,287 @@ function RentabilidadPage({ data }) {
 // ==========================================
 // IMPORTADOR & CONSULTAS & CONFIG
 // ==========================================
-function ImportadorPage({ data }) {
+function ImportadorPage({ data, refresh }) {
   const [dO, setDO] = useState(false);
   const [m, setM] = useState("");
-  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un Excel y dime qué contiene. Lo analizo y te digo qué datos he encontrado. También puedes escribirme directamente sin subir archivo — por ejemplo: 'Se ha muerto la cabra 057600' o 'Cambia la 056749 al Lote 4'." }]);
+  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un CSV del FLM o cualquier archivo de datos. Lo analizo y puedo importarlo a la base de datos. También puedes decirme cosas como 'Se ha muerto la cabra 057600' o 'Cambia la 056749 al Lote 4'." }]);
   const [ld, setLd] = useState(false);
   const [fileName, setFileName] = useState(null);
   const [fileData, setFileData] = useState(null);
+  const [rawRows, setRawRows] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
+  const parseCSV = (text) => {
+    const firstLine = text.split("\n")[0] || "";
+    let delimiter = ";";
+    if (firstLine.split(";").length < 3 && firstLine.split(",").length > 2) delimiter = ",";
+    if (firstLine.split(";").length < 3 && firstLine.split("\t").length > 2) delimiter = "\t";
+    const lines = text.split("\n").filter(l => l.trim());
+    return lines.map(line => {
+      const result = []; let current = ""; let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') inQ = !inQ;
+        else if (ch === delimiter && !inQ) { result.push(current.trim()); current = ""; }
+        else current += ch;
+      }
+      result.push(current.trim());
+      return result;
+    });
+  };
+
+  const isProductionCSV = (header) => {
+    const h = header.join(" ").toLowerCase();
+    return h.includes("producción diaria") || h.includes("litros totales") || h.includes("del") && h.includes("lactación");
+  };
+
+  const importProduction = async (rows) => {
+    setImporting(true);
+    setImportResult(null);
+    const header = rows[0];
+    const dataRows = rows.slice(1).filter(r => r[0] && r[0][0] >= '0' && r[0][0] <= '9' && !r[0].startsWith('Contar') && !r[0].startsWith('Suma'));
+    const today = new Date().toISOString().split('T')[0];
+    
+    let imported = 0, updated = 0, errors = 0, newCabras = 0, loteChanges = 0;
+    let totalLitros = 0;
+    const alertas = [];
+    const errorList = [];
+
+    // Map FLM group names to our lote names
+    const mapGrupo = (g) => {
+      if (g.includes("LOTE 1")) return "Lote 1";
+      if (g.includes("PARIDERA FEBRERO") || g.includes("Manada 1") && g.includes("13")) return "Grupo 13";
+      if (g.includes("LOTE 2")) return "Lote 2";
+      if (g.includes("LOTE 3")) return "Lote 3";
+      if (g.includes("BAJA PRODUCCION") || g.includes("LOTE 4")) return "Lote 4";
+      if (g.includes("CHOTAS") || g.includes("LOTE 5")) return "Lote 5";
+      if (g.includes("LOTE 6")) return "Lote 6";
+      if (g.includes("13")) return "Grupo 13";
+      return null;
+    };
+
+    for (const row of dataRows) {
+      try {
+        const crotal = row[0]?.trim();
+        if (!crotal) continue;
+        const grupo = row[1] || "";
+        const del_dias = parseFloat(row[2]) || 0;
+        const prod_diaria = parseFloat(row[3]) || 0;
+        const ultima_prod = parseFloat(row[4]) || 0;
+        const prom_10d = parseFloat(row[5]) || 0;
+        const lactacion = parseInt(row[6]) || 0;
+        const litros_totales = parseFloat(row[7]) || 0;
+        const promedio_total = parseFloat(row[8]) || 0;
+        const conductividad = parseFloat(row[9]) || 0;
+        const tiempo_ordeno = parseFloat(row[10]) || 0;
+        const flujo = row[11] ? parseFloat(row[11]) : null;
+
+        totalLitros += prod_diaria;
+
+        // Find cabra
+        let cabra = data.cabras.find(c => c.crotal === crotal);
+        
+        // If not found, create it
+        if (!cabra) {
+          const loteName = mapGrupo(grupo);
+          const lote = loteName ? data.lotes.find(l => l.nombre.includes(loteName.replace("Grupo ", "").replace("Lote ", ""))) : null;
+          const { data: newC, error: errC } = await supabase.from("cabra").insert([{
+            crotal, estado: "lactacion", sexo: "hembra", raza: "Murciano-Granadina",
+            num_lactaciones: lactacion, dias_en_leche: del_dias,
+            lote_id: lote?.id || null,
+            notas: `Añadida desde informe FLM ${today}`
+          }]).select().single();
+          if (errC) { errors++; errorList.push(`${crotal}: error creando cabra`); continue; }
+          cabra = newC;
+          newCabras++;
+        }
+
+        // Check if lote changed
+        const loteName = mapGrupo(grupo);
+        if (loteName && cabra.lote_id) {
+          const currentLote = data.lotes.find(l => l.id === cabra.lote_id);
+          if (currentLote && !currentLote.nombre.includes(loteName.replace("Grupo ", "").replace("Lote ", ""))) {
+            const newLote = data.lotes.find(l => l.nombre.includes(loteName.replace("Grupo ", "").replace("Lote ", "")));
+            if (newLote) {
+              await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
+              loteChanges++;
+            }
+          } else {
+            await supabase.from("cabra").update({ dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
+          }
+        }
+
+        // Insert production record (upsert to avoid duplicates)
+        const { error: errP } = await supabase.from("produccion_leche").upsert([{
+          cabra_id: cabra.id, fecha: today, litros: prod_diaria,
+          dia_lactacion: del_dias, media_10d: prom_10d,
+          litros_totales_lactacion: litros_totales, media_total: promedio_total,
+          lactacion_num: lactacion, lote_nombre: grupo,
+          ultima_produccion: ultima_prod, conductividad,
+          tiempo_ordeno, flujo, promedio_10d: prom_10d, promedio_total,
+        }], { onConflict: "cabra_id,fecha" });
+        
+        if (errP) { errors++; errorList.push(`${crotal}: ${errP.message}`); }
+        else imported++;
+
+        // Check alerts
+        if (conductividad > 6.0) alertas.push({ tipo: "alta", msg: `🔴 ${crotal}: conductividad ${conductividad.toFixed(2)} mS/cm — posible mastitis` });
+        if (prom_10d > 0 && prod_diaria < prom_10d * 0.7) alertas.push({ tipo: "media", msg: `⚠️ ${crotal}: producción ${prod_diaria.toFixed(1)}L (prom10d: ${prom_10d.toFixed(1)}L) — caída del ${((1 - prod_diaria / prom_10d) * 100).toFixed(0)}%` });
+        if (flujo && flujo < 0.1) alertas.push({ tipo: "media", msg: `⚠️ ${crotal}: flujo ${flujo.toFixed(3)} L/min — muy bajo` });
+        if (tiempo_ordeno > 14) alertas.push({ tipo: "baja", msg: `ℹ️ ${crotal}: tiempo ordeño ${tiempo_ordeno.toFixed(1)} min — excesivo` });
+
+      } catch (err) {
+        errors++;
+        errorList.push(`${row[0]}: ${err.message}`);
+      }
+    }
+
+    // Create daily summary
+    await supabase.from("resumen_diario").upsert([{
+      fecha: today, total_cabras: dataRows.length,
+      litros_totales: Math.round(totalLitros * 100) / 100,
+      media_litros: Math.round(totalLitros / dataRows.length * 1000) / 1000,
+      cabras_alta_conductividad: alertas.filter(a => a.msg.includes("conductividad")).length,
+      archivo_origen: fileName,
+    }], { onConflict: "fecha" });
+
+    setImportResult({ imported, updated, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length });
+    setImporting(false);
+    refresh();
+    
+    // Add result to chat
+    let chatMsg = `✅ Importación completada:\n• ${imported} registros de producción importados\n• ${totalLitros.toFixed(1)} litros totales hoy\n• ${loteChanges} cambios de lote detectados`;
+    if (newCabras > 0) chatMsg += `\n• ${newCabras} cabras nuevas creadas`;
+    if (errors > 0) chatMsg += `\n• ${errors} errores`;
+    if (alertas.length > 0) chatMsg += `\n\n🚨 ALERTAS (${alertas.length}):\n${alertas.slice(0, 10).map(a => a.msg).join("\n")}`;
+    setMs(p => [...p, { role: "assistant", text: chatMsg }]);
+  };
+
   const readFile = async (file) => {
     setFileName(file.name);
+    setImportResult(null);
     try {
-      if (!window.XLSX) {
-        await new Promise((resolve, reject) => {
-          const sc = document.createElement("script");
-          sc.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
-          sc.onload = resolve;
-          sc.onerror = reject;
-          document.head.appendChild(sc);
-        });
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const cleanRows = rows.filter(r => r.length > 1 && r[0]);
+      setRawRows(cleanRows);
+      setFileData({ "Datos": cleanRows.slice(0, 60) });
+      
+      const preview = cleanRows.slice(0, 10).map(r => r.join(" | ")).join("\n");
+      setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${cleanRows.length} filas)` }]);
+      
+      if (isProductionCSV(cleanRows[0] || [])) {
+        setMs(p => [...p, { role: "assistant", text: `He detectado un informe de producción del FLM con ${cleanRows.length - 1} cabras. Columnas: ${cleanRows[0].join(", ")}.\n\nPulsa el botón "Importar a Supabase" para procesarlo. Se actualizarán los datos de producción, los cambios de lote, y se generarán alertas de conductividad.` }]);
+      } else {
+        setLd(true);
+        const response = await askClaude(
+          `Archivo: "${file.name}". Primeras filas:\n\n${preview}\n\nTotal: ${cleanRows.length}. Analiza e identifica qué datos son.`,
+          dataCtx
+        );
+        setMs(p => [...p, { role: "assistant", text: response }]);
+        setLd(false);
       }
-      const XLSX = window.XLSX;
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: "array" });
-      const sheets = {};
-      wb.SheetNames.forEach(name => {
-        const ws = wb.Sheets[name];
-        const json = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-        sheets[name] = json.slice(0, 50); // First 50 rows
-      });
-      setFileData(sheets);
-      
-      // Auto-send to chat
-      const sheetName = wb.SheetNames[0];
-      const rows = sheets[sheetName];
-      const preview = rows.slice(0, 15).map(r => r.join(" | ")).join("\n");
-      const summary = `He subido el archivo "${file.name}" con ${rows.length} filas.\n\nPrimeras filas:\n${preview}`;
-      
-      setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${rows.length} filas)` }]);
-      setLd(true);
-      const response = await askClaude(
-        `El usuario ha subido un archivo Excel llamado "${file.name}". Aquí están las primeras filas:\n\n${preview}\n\nTotal filas: ${rows.length}\n\nAnaliza el contenido, identifica qué tipo de datos son (ecografías, tratamientos, producción, paridera, cubriciones, etc.) y explica qué has encontrado. Sugiere qué acción tomar para importarlo.`,
-        dataCtx
-      );
-      setMs(p => [...p, { role: "assistant", text: response }]);
-      setLd(false);
     } catch (err) {
-      setMs(p => [...p, { role: "assistant", text: `Error leyendo el archivo: ${err.message}. Asegúrate de que es un archivo Excel (.xlsx).` }]);
+      setMs(p => [...p, { role: "assistant", text: `Error: ${err.message}` }]);
     }
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault(); setDO(false);
-    const file = e.dataTransfer.files[0];
-    if (file) readFile(file);
-  };
-
+  const handleDrop = (e) => { e.preventDefault(); setDO(false); const f = e.dataTransfer.files[0]; if (f) readFile(f); };
   const handleClick = () => { fileRef.current?.click(); };
-  const handleFileChange = (e) => { const file = e.target.files[0]; if (file) readFile(file); };
+  const handleFileChange = (e) => { const f = e.target.files[0]; if (f) readFile(f); };
 
   const s = async () => { 
     if (!m.trim()) return; 
     const userMsg = m;
-    setMs(p => [...p, { role: "user", text: userMsg }]); 
-    setM(""); 
-    setLd(true);
-    
+    setMs(p => [...p, { role: "user", text: userMsg }]); setM(""); setLd(true);
     let ctx = dataCtx;
-    if (fileData) {
-      const sheetName = Object.keys(fileData)[0];
-      const rows = fileData[sheetName];
-      const preview = rows.slice(0, 20).map(r => r.join(" | ")).join("\n");
-      ctx += `\n\nARCHIVO SUBIDO: ${fileName}\nContenido (primeras 20 filas):\n${preview}`;
+    if (rawRows) {
+      const preview = rawRows.slice(0, 20).map(r => r.join(" | ")).join("\n");
+      ctx += `\n\nARCHIVO: ${fileName}\n${preview}`;
     }
-    
     const response = await askClaude(userMsg, ctx);
     setMs(p => [...p, { role: "assistant", text: response }]);
     setLd(false);
   };
 
+  const canImport = rawRows && isProductionCSV(rawRows[0] || []);
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
       <div>
-        <SectionTitle icon="📁" text="Subir Excel" />
-        <input type="file" ref={fileRef} onChange={handleFileChange} accept=".xlsx,.xls,.csv" style={{ display: "none" }} />
-        <div 
-          onClick={handleClick}
-          onDragOver={e => { e.preventDefault(); setDO(true); }} 
-          onDragLeave={() => setDO(false)} 
-          onDrop={handleDrop}
-          style={{ 
-            border: `2px dashed ${dO ? "#E8950A" : fileName ? "#059669" : "#E2E8F0"}`, 
-            borderRadius: 16, padding: "42px 28px", textAlign: "center", 
-            background: dO ? "#FEF9EE" : fileName ? "#F0FDF4" : "#FAFAFA", 
-            cursor: "pointer", transition: "all .3s" 
-          }}>
-          {fileName ? (
-            <>
-              <div style={{ fontSize: 42, marginBottom: 12 }}>✅</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#059669" }}>{fileName}</div>
-              <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 4 }}>Archivo cargado — haz clic para cambiar</div>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: 42, marginBottom: 12 }}>📎</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>Arrastra el Excel aquí</div>
-              <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 4 }}>o haz clic para seleccionar archivo</div>
-            </>
-          )}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 14 }}>
-          {[{ i: "📊", n: "Producción" }, { i: "🔬", n: "Ecografías" }, { i: "💉", n: "Tratamientos" }, { i: "🐣", n: "Paridera" }, { i: "🐐", n: "Cubriciones" }, { i: "📋", n: "Otro" }].map((t, j) =>
-            <div key={j} style={{ background: "#FFF", border: "1px solid #F1F5F9", borderRadius: 10, padding: 11, textAlign: "center", cursor: "pointer" }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = "#E8950A80"} onMouseLeave={e => e.currentTarget.style.borderColor = "#F1F5F9"}>
-              <div style={{ fontSize: 20 }}>{t.i}</div><div style={{ fontSize: 11.5, fontWeight: 600, color: "#334155", marginTop: 2 }}>{t.n}</div>
-            </div>
-          )}
+        <SectionTitle icon="📁" text="Subir Datos" />
+        <input type="file" ref={fileRef} onChange={handleFileChange} accept=".csv,.txt" style={{ display: "none" }} />
+        <div onClick={handleClick} onDragOver={e => { e.preventDefault(); setDO(true); }} onDragLeave={() => setDO(false)} onDrop={handleDrop}
+          style={{ border: `2px dashed ${dO ? "#E8950A" : fileName ? "#059669" : "#E2E8F0"}`, borderRadius: 16, padding: "36px 28px", textAlign: "center", background: dO ? "#FEF9EE" : fileName ? "#F0FDF4" : "#FAFAFA", cursor: "pointer", transition: "all .3s" }}>
+          {fileName ? (<>
+            <div style={{ fontSize: 38, marginBottom: 10 }}>✅</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#059669" }}>{fileName}</div>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 3 }}>Archivo cargado — clic para cambiar</div>
+          </>) : (<>
+            <div style={{ fontSize: 38, marginBottom: 10 }}>📎</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>Arrastra el CSV aquí</div>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 3 }}>o haz clic para seleccionar</div>
+          </>)}
         </div>
 
-        {fileData && (
+        {canImport && !importResult && (
+          <button onClick={() => importProduction(rawRows)} disabled={importing}
+            style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
+              background: importing ? "#94A3B8" : "linear-gradient(135deg, #059669, #047857)", color: "#FFF",
+            }}>
+            {importing ? "⏳ Importando..." : `🚀 Importar ${rawRows.length - 1} cabras a Supabase`}
+          </button>
+        )}
+
+        {importResult && (
+          <Card style={{ marginTop: 14, background: importResult.errors > 0 ? "#FEF9EE" : "#F0FDF4", border: `1px solid ${importResult.errors > 0 ? "#FDE68A" : "#BBF7D0"}` }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", marginBottom: 10 }}>✅ Importación completada</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 10 }}>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#059669" }}>{importResult.imported}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Importados</div>
+              </div>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#E8950A" }}>{importResult.totalLitros.toFixed(0)}L</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Litros hoy</div>
+              </div>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#7C3AED" }}>{importResult.loteChanges}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Cambios lote</div>
+              </div>
+            </div>
+            {importResult.alertas.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>🚨 Alertas ({importResult.alertas.length})</div>
+                {importResult.alertas.slice(0, 8).map((a, i) => (
+                  <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0", borderBottom: "1px solid #F1F5F9" }}>{a.msg}</div>
+                ))}
+                {importResult.alertas.length > 8 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>...y {importResult.alertas.length - 8} más</div>}
+              </div>
+            )}
+            {importResult.errors > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626" }}>Errores ({importResult.errors})</div>
+                {importResult.errorList.slice(0, 5).map((e, i) => <div key={i} style={{ fontSize: 11, color: "#DC2626" }}>{e}</div>)}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {fileData && !importResult && (
           <Card style={{ marginTop: 14 }}>
-            <SectionTitle icon="📋" text="Vista previa del archivo" />
-            <div style={{ overflow: "auto", maxHeight: 200 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <SectionTitle icon="📋" text="Vista previa" />
+            <div style={{ overflow: "auto", maxHeight: 180 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
                 <tbody>
-                  {Object.values(fileData)[0].slice(0, 10).map((row, i) => (
-                    <tr key={i}>
-                      {row.map((cell, j) => (
-                        <td key={j} style={{ padding: "4px 8px", borderBottom: "1px solid #F1F5F9", color: "#475569", fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap" }}>
-                          {String(cell).substring(0, 20)}
+                  {Object.values(fileData)[0].slice(0, 8).map((row, i) => (
+                    <tr key={i} style={{ background: i === 0 ? "#F8FAFC" : "transparent" }}>
+                      {row.slice(0, 8).map((cell, j) => (
+                        <td key={j} style={{ padding: "3px 6px", borderBottom: "1px solid #F1F5F9", color: i === 0 ? "#94A3B8" : "#475569", fontWeight: i === 0 ? 700 : 400, fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap", fontSize: i === 0 ? 9 : 10.5 }}>
+                          {String(cell).substring(0, 15)}
                         </td>
                       ))}
                     </tr>
@@ -917,15 +1080,12 @@ function ImportadorPage({ data }) {
                 </tbody>
               </table>
             </div>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>
-              Mostrando las primeras 10 filas · {Object.values(fileData)[0].length} filas en total
-            </div>
+            <div style={{ fontSize: 10.5, color: "#94A3B8", marginTop: 6 }}>{Object.values(fileData)[0].length} filas · mostrando primeras 8 columnas</div>
           </Card>
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho..." height={fileName ? 350 : 470} />
-        {ld && <div style={{ textAlign: "center", padding: 12, fontSize: 13, color: "#E8950A" }}>Analizando...</div>}
+        <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho o pregunta..." height={canImport ? 380 : 500} />
       </div>
     </div>
   );
@@ -1454,7 +1614,7 @@ export default function App() {
         </div>
         {page === "dashboard" && <DashboardPage data={data} />}
         {page === "rentabilidad" && <RentabilidadPage data={data} />}
-        {page === "importador" && <ImportadorPage data={data} />}
+        {page === "importador" && <ImportadorPage data={data} refresh={refresh} />}
         {page === "consultas" && <ConsultasPage data={data} />}
         {page === "config" && <ConfigPage data={data} refresh={refresh} />}
       </div>

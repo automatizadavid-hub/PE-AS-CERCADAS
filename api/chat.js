@@ -50,13 +50,13 @@ CICLO DE UNA CABRA:
 5. Día ~360 (5 meses gestación) → nuevo parto
 
 LOTES (el número del lote es el primer número de la columna grupo del FLM):
-- Lote 1: Alta producción (>2L/día)
-- Lote 13: Adultas paridera febrero
+- Lote 1: Alta producción
 - Lote 2: Pariendo ahora
-- Lote 3: Gestantes secándose, paren abril/mayo
-- Lote 4: Baja producción (<2L/día)
-- Lote 5: Chotas nuevas, primera paridera
-- Lote 6: Con machos (entraron 20 feb, salen 20 mar)
+- Lote 3: Secas, paren abril/mayo
+- Lote 4: Baja producción
+- Lote 5: Chotas en producción, paridas enero/febrero
+- Lote 6: Recién quitado machos
+- Lote 13: Adultas paridas en febrero
 
 PARIDERAS ACTIVAS:
 - Paridera Febrero 2026: machos 15 ago 2025, partos ene-mar 2026 (en curso)

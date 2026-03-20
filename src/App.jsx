@@ -843,14 +843,14 @@ function ImportadorPage({ data, refresh }) {
 
     // Map FLM group names to our lote names
     const mapGrupo = (g) => {
-      if (g.includes("LOTE 1")) return "Lote 1";
-      if (g.includes("PARIDERA FEBRERO") || g.includes("Manada 1") && g.includes("13")) return "Grupo 13";
-      if (g.includes("LOTE 2")) return "Lote 2";
-      if (g.includes("LOTE 3")) return "Lote 3";
-      if (g.includes("BAJA PRODUCCION") || g.includes("LOTE 4")) return "Lote 4";
-      if (g.includes("CHOTAS") || g.includes("LOTE 5")) return "Lote 5";
-      if (g.includes("LOTE 6")) return "Lote 6";
-      if (g.includes("13")) return "Grupo 13";
+      if (!g) return null;
+      if (g.includes("1 LOTE 1") || (g.includes("Manada 1") && !g.includes("13"))) return "Lote 1";
+      if (g.includes("13 PARIDERA") || g.includes("13")) return "Grupo 13";
+      if (g.includes("2 LOTE 2") || g.includes("Manada 2")) return "Lote 2";
+      if (g.includes("3 LOTE 3") || g.includes("Manada 3")) return "Lote 3";
+      if (g.includes("BAJA PRODUCCION") || g.includes("4 BAJA") || g.includes("Manada 4")) return "Lote 4";
+      if (g.includes("CHOTAS") || g.includes("5 CHOTAS") || g.includes("Manada 5")) return "Lote 5";
+      if (g.includes("6 LOTE 6") || g.includes("Manada 6")) return "Lote 6";
       return null;
     };
 
@@ -878,7 +878,7 @@ function ImportadorPage({ data, refresh }) {
         // If not found, create it
         if (!cabra) {
           const loteName = mapGrupo(grupo);
-          const lote = loteName ? data.lotes.find(l => l.nombre.includes(loteName.replace("Grupo ", "").replace("Lote ", ""))) : null;
+          const lote = loteName ? data.lotes.find(l => l.nombre === loteName) : null;
           const { data: newC, error: errC } = await supabase.from("cabra").insert([{
             crotal, estado: "lactacion", sexo: "hembra", raza: "Murciano-Granadina",
             num_lactaciones: lactacion, dias_en_leche: del_dias,
@@ -892,14 +892,11 @@ function ImportadorPage({ data, refresh }) {
 
         // Check if lote changed
         const loteName = mapGrupo(grupo);
-        if (loteName && cabra.lote_id) {
-          const currentLote = data.lotes.find(l => l.id === cabra.lote_id);
-          if (currentLote && !currentLote.nombre.includes(loteName.replace("Grupo ", "").replace("Lote ", ""))) {
-            const newLote = data.lotes.find(l => l.nombre.includes(loteName.replace("Grupo ", "").replace("Lote ", "")));
-            if (newLote) {
-              await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
-              loteChanges++;
-            }
+        if (loteName) {
+          const newLote = data.lotes.find(l => l.nombre === loteName);
+          if (newLote && cabra.lote_id !== newLote.id) {
+            await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
+            loteChanges++;
           } else {
             await supabase.from("cabra").update({ dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
           }
@@ -1518,10 +1515,266 @@ function ConfigPage({ data, refresh }) {
 }
 
 // ==========================================
+// PRODUCCIÓN & ANÁLISIS — The Beast
+// ==========================================
+function ProduccionPage({ data }) {
+  const [prodMsg, setProdMsg] = useState("");
+  const [prodMsgs, setProdMsgs] = useState([{ role: "assistant", text: "Soy el analista de producción de Peñas Cercadas. Puedo analizar rendimiento, detectar tendencias, comparar lotes, identificar las mejores y peores cabras, y recomendar decisiones. Pregúntame lo que quieras." }]);
+  const [prodLd, setProdLd] = useState(false);
+  const dataCtx = buildDataContext(data);
+
+  // Get latest production data
+  const prod = data.produccion || [];
+  const latestDate = prod.length > 0 ? prod[0].fecha : null;
+  const todayProd = latestDate ? prod.filter(p => p.fecha === latestDate) : [];
+
+  // Build production stats by cabra
+  const cabraStats = {};
+  todayProd.forEach(p => {
+    const cabra = data.cabras.find(c => c.id === p.cabra_id);
+    if (!cabra) return;
+    cabraStats[cabra.crotal] = {
+      crotal: cabra.crotal,
+      lote: cabra.lote?.nombre || "-",
+      lote_id: cabra.lote_id,
+      litros: p.litros || 0,
+      ultima_prod: p.ultima_produccion || 0,
+      del: p.dia_lactacion || 0,
+      lactacion: p.lactacion_num || 0,
+      litros_totales: p.litros_totales_lactacion || 0,
+      promedio_total: p.promedio_total || p.media_total || 0,
+      promedio_10d: p.promedio_10d || p.media_10d || 0,
+      conductividad: p.conductividad || 0,
+      tiempo_ordeno: p.tiempo_ordeno || 0,
+      flujo: p.flujo || 0,
+    };
+  });
+  const stats = Object.values(cabraStats);
+  const sortedByProd = [...stats].sort((a, b) => b.litros - a.litros);
+  const totalLitros = stats.reduce((s, c) => s + c.litros, 0);
+  const avgLitros = stats.length > 0 ? totalLitros / stats.length : 0;
+  const avgConductividad = stats.length > 0 ? stats.reduce((s, c) => s + c.conductividad, 0) / stats.length : 0;
+
+  // Per-lote analysis
+  const loteStats = {};
+  stats.forEach(s => {
+    if (!loteStats[s.lote]) loteStats[s.lote] = { nombre: s.lote, cabras: 0, litros: 0, condTotal: 0 };
+    loteStats[s.lote].cabras++;
+    loteStats[s.lote].litros += s.litros;
+    loteStats[s.lote].condTotal += s.conductividad;
+  });
+  const loteData = Object.values(loteStats).map(l => ({
+    ...l, media: l.cabras > 0 ? l.litros / l.cabras : 0,
+    condMedia: l.cabras > 0 ? l.condTotal / l.cabras : 0,
+  })).sort((a, b) => b.media - a.media);
+
+  // Production distribution (histogram)
+  const distBuckets = [
+    { range: "0-1L", min: 0, max: 1 }, { range: "1-2L", min: 1, max: 2 },
+    { range: "2-3L", min: 2, max: 3 }, { range: "3-4L", min: 3, max: 4 },
+    { range: "4-5L", min: 4, max: 5 }, { range: "5L+", min: 5, max: 99 },
+  ];
+  const distData = distBuckets.map(b => ({
+    rango: b.range,
+    cabras: stats.filter(s => s.litros >= b.min && s.litros < b.max).length,
+  }));
+
+  // Health alerts from today's production
+  const healthAlerts = [];
+  stats.filter(s => s.conductividad > 6.0).sort((a, b) => b.conductividad - a.conductividad)
+    .forEach(s => healthAlerts.push({ tipo: "alta", msg: `${s.crotal}: conductividad ${s.conductividad.toFixed(2)} mS/cm`, icon: "🔴" }));
+  stats.filter(s => s.promedio_10d > 0 && s.litros < s.promedio_10d * 0.65).sort((a, b) => (a.litros / a.promedio_10d) - (b.litros / b.promedio_10d))
+    .forEach(s => healthAlerts.push({ tipo: "media", msg: `${s.crotal}: produce ${s.litros.toFixed(1)}L (prom: ${s.promedio_10d.toFixed(1)}L) → caída ${((1 - s.litros / s.promedio_10d) * 100).toFixed(0)}%`, icon: "📉" }));
+  stats.filter(s => s.flujo > 0 && s.flujo < 0.1)
+    .forEach(s => healthAlerts.push({ tipo: "media", msg: `${s.crotal}: flujo ${s.flujo.toFixed(3)} L/min — muy bajo`, icon: "🐐" }));
+
+  // Lote chart data
+  const loteChartData = loteData.map(l => ({ nombre: l.nombre.replace("- Manada", "").substring(0, 15), media: Math.round(l.media * 100) / 100, cabras: l.cabras, litros: Math.round(l.litros * 10) / 10 }));
+
+  // Candidates for culling: low production + high lactations
+  const cullCandidates = [...stats]
+    .filter(s => s.litros < 1.5 && s.lactacion >= 3 && s.del > 60)
+    .sort((a, b) => a.litros - b.litros);
+
+  // Rising stars: high production in first lactation
+  const risingStars = [...stats]
+    .filter(s => s.lactacion === 1 && s.litros > 3.0)
+    .sort((a, b) => b.litros - a.litros);
+
+  const sendProd = async () => {
+    if (!prodMsg.trim()) return;
+    const userMsg = prodMsg;
+    setProdMsgs(p => [...p, { role: "user", text: userMsg }]); setProdMsg(""); setProdLd(true);
+    const prodCtx = dataCtx + `\n\nDATOS DE PRODUCCIÓN DE HOY (${latestDate || "sin datos"}):\nTotal litros: ${totalLitros.toFixed(1)}\nMedia/cabra: ${avgLitros.toFixed(2)}L\nCabras en ordeño: ${stats.length}\nMedia conductividad: ${avgConductividad.toFixed(2)}\n\nTOP 10 productoras: ${sortedByProd.slice(0, 10).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L (DEL=${s.del}, Lact=${s.lactacion})`).join("; ")}\n\nPEORES 10: ${sortedByProd.slice(-10).reverse().map(s => `${s.crotal}: ${s.litros.toFixed(2)}L (DEL=${s.del}, Lact=${s.lactacion})`).join("; ")}\n\nPOR LOTE: ${loteData.map(l => `${l.nombre}: ${l.cabras} cabras, media ${l.media.toFixed(2)}L`).join("; ")}\n\nALERTAS CONDUCTIVIDAD (>6.0): ${stats.filter(s => s.conductividad > 6.0).map(s => `${s.crotal}: ${s.conductividad.toFixed(2)}`).join(", ") || "ninguna"}\n\nCANDIDATAS DESCARTE (baja prod + muchas lactaciones): ${cullCandidates.slice(0, 10).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L, lact=${s.lactacion}`).join("; ") || "ninguna"}\n\nESTRELLAS EMERGENTES (1ª lactación >3L): ${risingStars.slice(0, 10).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L`).join(", ") || "ninguna"}`;
+    const response = await askClaude(userMsg, prodCtx);
+    setProdMsgs(p => [...p, { role: "assistant", text: response }]);
+    setProdLd(false);
+  };
+
+  if (stats.length === 0) return (
+    <div style={{ textAlign: "center", padding: 60 }}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: "#1E293B", marginBottom: 8 }}>Sin datos de producción</div>
+      <div style={{ fontSize: 14, color: "#94A3B8" }}>Importa un CSV del FLM desde el Importador para ver los análisis.</div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      {/* KPIs */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12 }}>
+        <KPI icon="🥛" label="Litros hoy" value={`${totalLitros.toFixed(0)}L`} sub={`${latestDate}`} accent="#059669" />
+        <KPI icon="🐐" label="Media/cabra" value={`${avgLitros.toFixed(2)}L`} sub={`${stats.length} en ordeño`} accent="#E8950A" />
+        <KPI icon="🏆" label="Top cabra" value={`${sortedByProd[0]?.litros.toFixed(1)}L`} sub={sortedByProd[0]?.crotal || "-"} accent="#7C3AED" />
+        <KPI icon="📉" label="Peor cabra" value={`${sortedByProd[sortedByProd.length-1]?.litros.toFixed(1)}L`} sub={sortedByProd[sortedByProd.length-1]?.crotal || "-"} accent="#DC2626" />
+        <KPI icon="🔬" label="Conductividad" value={`${avgConductividad.toFixed(2)}`} sub={`${stats.filter(s => s.conductividad > 6.0).length} alertas`} accent="#DB2777" />
+        <KPI icon="⚡" label="Flujo medio" value={`${(stats.reduce((s, c) => s + (c.flujo || 0), 0) / stats.length).toFixed(2)}`} sub="L/min" accent="#0891B2" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Lote comparison */}
+          <Card>
+            <SectionTitle icon="📊" text="Producción por Lote" />
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={loteChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                <XAxis dataKey="nombre" tick={{ fontSize: 10, fill: "#94A3B8" }} angle={-20} textAnchor="end" height={60} />
+                <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} />
+                <Tooltip content={<CustomTooltip formatter={v => typeof v === "number" ? `${v.toFixed(2)}` : v} />} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="media" name="Media L/cabra" fill="#E8950A" radius={[6, 6, 0, 0]} barSize={28} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+              {loteData.map((l, i) => (
+                <div key={i} style={{ background: "#FAFAFA", border: "1px solid #F1F5F9", borderRadius: 10, padding: "10px 14px", flex: "1 1 auto", minWidth: 140 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{l.nombre}</div>
+                  <div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: 11, color: "#64748B" }}>
+                    <span>{l.cabras} cabras</span>
+                    <span style={{ fontWeight: 700, color: "#E8950A" }}>{l.media.toFixed(2)} L/cab</span>
+                    <span>{l.litros.toFixed(0)} L total</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Distribution */}
+          <Card>
+            <SectionTitle icon="📈" text="Distribución de Producción" />
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={distData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                <XAxis dataKey="rango" tick={{ fontSize: 12, fill: "#94A3B8" }} />
+                <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} />
+                <Tooltip content={<CustomTooltip formatter={v => `${v} cabras`} />} />
+                <Bar dataKey="cabras" name="Cabras" fill="#7C3AED" radius={[6, 6, 0, 0]} barSize={36} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {/* Top 15 */}
+            <Card>
+              <SectionTitle icon="🏆" text={`Top 15 Productoras`} color="#059669" />
+              {sortedByProd.slice(0, 15).map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F8FAFC" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: i < 3 ? "#E8950A" : "#94A3B8", width: 20 }}>{i + 1}</span>
+                    <div>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: "#334155", fontFamily: "'Space Mono', monospace" }}>{s.crotal}</span>
+                      <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: 6 }}>L{s.lactacion} D{s.del}</span>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#059669", fontFamily: "'Space Mono', monospace" }}>{s.litros.toFixed(2)}L</span>
+                </div>
+              ))}
+            </Card>
+
+            {/* Bottom 15 + cull candidates */}
+            <Card>
+              <SectionTitle icon="⚠️" text="Candidatas a Descarte" color="#DC2626" />
+              {cullCandidates.length === 0 && <div style={{ fontSize: 12, color: "#94A3B8", padding: 10 }}>No hay candidatas claras hoy</div>}
+              {cullCandidates.slice(0, 12).map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F8FAFC" }}>
+                  <div>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "#334155", fontFamily: "'Space Mono', monospace" }}>{s.crotal}</span>
+                    <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: 6 }}>L{s.lactacion} D{s.del}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", fontFamily: "'Space Mono', monospace" }}>{s.litros.toFixed(2)}L</span>
+                    <Badge text={`Lact ${s.lactacion}`} color="#94A3B8" />
+                  </div>
+                </div>
+              ))}
+              {risingStars.length > 0 && (<>
+                <div style={{ marginTop: 16 }}><SectionTitle icon="⭐" text="Estrellas Emergentes (1ª lact)" color="#E8950A" /></div>
+                {risingStars.slice(0, 8).map((s, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F8FAFC" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "#334155", fontFamily: "'Space Mono', monospace" }}>{s.crotal}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", fontFamily: "'Space Mono', monospace" }}>{s.litros.toFixed(2)}L</span>
+                  </div>
+                ))}
+              </>)}
+            </Card>
+          </div>
+        </div>
+
+        {/* Right sidebar: alerts + chat */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Health alerts */}
+          {healthAlerts.length > 0 && (
+            <Card style={{ background: "#FEF2F2", border: "1px solid #FECACA" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#DC2626", marginBottom: 10 }}>🚨 Alertas Sanitarias ({healthAlerts.length})</div>
+              {healthAlerts.slice(0, 10).map((a, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: "#7F1D1D", padding: "4px 0", borderBottom: i < 9 ? "1px solid #FECACA40" : "none" }}>
+                  {a.icon} {a.msg}
+                </div>
+              ))}
+              {healthAlerts.length > 10 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>...y {healthAlerts.length - 10} más</div>}
+            </Card>
+          )}
+
+          {/* Production chat */}
+          <ChatBox
+            messages={prodMsgs} input={prodMsg} setInput={setProdMsg} onSend={sendProd}
+            examples={["¿Cuáles son las 20 mejores cabras?", "¿Qué lote rinde más?", "Cabras para descartar", "¿Cuánto producimos hoy?"]}
+            onExample={setProdMsg}
+            placeholder="Analiza la producción..."
+            height={healthAlerts.length > 0 ? 340 : 450}
+          />
+
+          {/* Quick insights */}
+          <Card style={{ background: "linear-gradient(135deg, #FEF9EE, #FFF7ED)", border: "1px solid #FDE68A" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#E8950A", marginBottom: 8 }}>💡 Observaciones de hoy</div>
+            {[
+              `Producción total: ${totalLitros.toFixed(0)}L (${avgLitros.toFixed(2)}L/cabra)`,
+              loteData.length > 0 ? `Mejor lote: ${loteData[0].nombre} (${loteData[0].media.toFixed(2)} L/cab)` : null,
+              loteData.length > 1 ? `Peor lote: ${loteData[loteData.length - 1].nombre} (${loteData[loteData.length - 1].media.toFixed(2)} L/cab)` : null,
+              `${stats.filter(s => s.litros > 4).length} cabras producen más de 4L`,
+              `${stats.filter(s => s.litros < 1).length} cabras producen menos de 1L`,
+              cullCandidates.length > 0 ? `${cullCandidates.length} candidatas a descarte (baja prod + muchas lactaciones)` : null,
+              risingStars.length > 0 ? `${risingStars.length} estrellas emergentes en 1ª lactación con >3L` : null,
+              stats.filter(s => s.conductividad > 6.0).length > 0 ? `⚠️ ${stats.filter(s => s.conductividad > 6.0).length} cabras con conductividad alta` : null,
+            ].filter(Boolean).map((obs, i) => (
+              <div key={i} style={{ fontSize: 11.5, color: "#78590A", lineHeight: 1.4, padding: "3px 0", display: "flex", gap: 6 }}>
+                <span style={{ color: "#E8950A" }}>→</span>{obs}
+              </div>
+            ))}
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
 // MAIN APP
 // ==========================================
 const NAV = [
   { id: "dashboard", icon: "📊", label: "Dashboard" },
+  { id: "produccion", icon: "🥛", label: "Producción" },
   { id: "rentabilidad", icon: "💰", label: "Rentabilidad" },
   { id: "importador", icon: "📁", label: "Importador" },
   { id: "consultas", icon: "💬", label: "Consultas" },
@@ -1602,17 +1855,19 @@ export default function App() {
       <div style={{ padding: "22px 28px", maxWidth: 1360, margin: "0 auto" }}>
         <div style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 23, fontWeight: 800, color: "#1E293B", letterSpacing: "-.02em" }}>
-            {{ dashboard: "Dashboard", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", config: "Configuración" }[page]}
+            {{ dashboard: "Dashboard", produccion: "Producción & Análisis", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", config: "Configuración" }[page]}
           </div>
           <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 3 }}>
             {{ dashboard: `Datos en vivo de Supabase · ${data.cabras.length} cabras · ${data.parideras.length} parideras`,
+              produccion: `Análisis productivo · ${data.produccion?.length || 0} registros · Alertas sanitarias`,
               rentabilidad: "Análisis financiero · Previsión de producción · Control de ingresos y gastos",
-              importador: "Sube Excel y el asistente los procesa automáticamente",
+              importador: "Sube CSV del FLM y se importa automáticamente a Supabase",
               consultas: "Pregunta lo que quieras — respuestas con datos reales",
               config: `${data.reglas.length} reglas · ${data.protocolos.length} protocolos veterinarios` }[page]}
           </div>
         </div>
         {page === "dashboard" && <DashboardPage data={data} />}
+        {page === "produccion" && <ProduccionPage data={data} />}
         {page === "rentabilidad" && <RentabilidadPage data={data} />}
         {page === "importador" && <ImportadorPage data={data} refresh={refresh} />}
         {page === "consultas" && <ConsultasPage data={data} />}

@@ -20,6 +20,17 @@ REGLAS FUNDAMENTALES:
 4. Cuando des números, sé exacto — no redondees salvo que lo pida el usuario.
 5. Si te preguntan algo que no puedes responder con los datos disponibles, dilo claramente.
 
+FORMATO DE RESPUESTA:
+- Usa ## para títulos de sección (ej: ## Producción actual)
+- Usa **texto** para datos importantes o etiquetas
+- Usa listas con - para datos tabulares
+- Cuando presentes fichas de cabras, organiza por secciones: Producción, Reproducción, Sanidad
+- Para listas de cabras usa el formato: **057997**: 3.8L/día, DEL=167, Lact=3
+- Para alertas o advertencias usa ⚠️ al inicio
+- Para datos positivos usa ✅
+- Para datos negativos o preocupantes usa 🔴
+- Sé esquemático y visual, NO escribas párrafos largos
+
 PARÁMETROS DE LA GRANJA:
 - ~580 cabras de raza Murciano-Granadina en régimen intensivo
 - 4 parideras al año: machos entran 20 feb / 15 may / 15 ago / 15 nov
@@ -38,9 +49,9 @@ CICLO DE UNA CABRA:
 4. Día ~300 (3 meses gestación) → secado
 5. Día ~360 (5 meses gestación) → nuevo parto
 
-LOTES:
+LOTES (el número del lote es el primer número de la columna grupo del FLM):
 - Lote 1: Alta producción (>2L/día)
-- Grupo 13: Adultas paridera febrero
+- Lote 13: Adultas paridera febrero
 - Lote 2: Pariendo ahora
 - Lote 3: Gestantes secándose, paren abril/mayo
 - Lote 4: Baja producción (<2L/día)
@@ -84,7 +95,7 @@ Responde de forma útil, precisa y práctica. Si detectas algo anómalo o una op
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
+        max_tokens: 3000,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: message }]
       })

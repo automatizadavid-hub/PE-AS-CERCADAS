@@ -292,7 +292,9 @@ function ChatBox({ messages, input, setInput, onSend, examples, onExample, place
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m, i) => (
-          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: "10px 15px", maxWidth: "85%", fontSize: 13, color: "#334155", lineHeight: 1.5 }}>{m.text}</div>
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: "10px 15px", maxWidth: m.role === "user" ? "85%" : "95%", fontSize: 13, color: "#334155", lineHeight: 1.5 }}>
+            {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+          </div>
         ))}
       </div>
       {examples && <div style={{ padding: "0 16px 8px", display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -322,6 +324,67 @@ function CustomTooltip({ active, payload, label, formatter }) {
 }
 
 // ==========================================
+// FORMATTED MESSAGE — Renders structured responses as cards
+// ==========================================
+function FormattedLine({ line }) {
+  let l = line;
+  const isList = l.startsWith('- ') || l.startsWith('• ');
+  if (isList) l = l.replace(/^[-•]\s*/, '');
+  const isAlert = l.includes('⚠️') || l.includes('🔴') || l.includes('ALERTA');
+  const isPositive = l.includes('✅');
+  
+  const parts = [];
+  const regex = /\*\*(.*?)\*\*/g;
+  let lastIdx = 0; let match;
+  while ((match = regex.exec(l)) !== null) {
+    if (match.index > lastIdx) parts.push({ text: l.slice(lastIdx, match.index), bold: false });
+    parts.push({ text: match[1], bold: true });
+    lastIdx = match.index + match[0].length;
+  }
+  if (lastIdx < l.length) parts.push({ text: l.slice(lastIdx), bold: false });
+  if (parts.length === 0) parts.push({ text: l, bold: false });
+  
+  const bg = isAlert ? "#FEF2F2" : isPositive ? "#F0FDF4" : isList ? "#FAFAFA" : "transparent";
+  const border = isAlert ? "1px solid #FECACA" : isPositive ? "1px solid #BBF7D0" : isList ? "1px solid #F1F5F9" : "none";
+  
+  return (
+    <div style={{ fontSize: 12.5, color: isAlert ? "#991B1B" : "#334155", lineHeight: 1.5, padding: isList || isAlert || isPositive ? "5px 10px" : "2px 0", background: bg, border, borderRadius: 7, marginBottom: 2, display: "flex", alignItems: "flex-start", gap: 6 }}>
+      {isList && <span style={{ color: "#E8950A", fontWeight: 700, flexShrink: 0 }}>›</span>}
+      <span>{parts.map((p, i) => p.bold ? <span key={i} style={{ fontWeight: 700, color: "#1E293B", fontFamily: "'Space Mono', monospace", fontSize: 12 }}>{p.text}</span> : <span key={i}>{p.text}</span>)}</span>
+    </div>
+  );
+}
+
+function FormattedMessage({ text }) {
+  if (!text) return null;
+  const lines = text.split('\n');
+  const elements = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith('## ')) {
+      const title = line.replace('## ', '');
+      const sectionLines = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('## ')) {
+        if (lines[i].trim()) sectionLines.push(lines[i]);
+        i++;
+      }
+      elements.push(
+        <div key={elements.length} style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 12, padding: "14px 18px", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F1F5F9" }}>{title}</div>
+          {sectionLines.map((sl, j) => <FormattedLine key={j} line={sl} />)}
+        </div>
+      );
+      continue;
+    }
+    if (line.trim()) elements.push(<FormattedLine key={elements.length} line={line} />);
+    i++;
+  }
+  return <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>{elements}</div>;
+}
+
+// ==========================================
 // LOADING SPINNER
 // ==========================================
 function LoadingScreen() {
@@ -338,7 +401,7 @@ function LoadingScreen() {
 // ==========================================
 function DashboardPage({ data }) {
   const [modal, setModal] = useState(null);
-  const LOTE_COLORS = { "Lote 1": "#E8950A", "Grupo 13": "#059669", "Lote 2": "#DB2777", "Lote 3": "#7C3AED", "Lote 4": "#DC2626", "Lote 5": "#0891B2", "Lote 6": "#EA580C" };
+  const LOTE_COLORS = { "Lote 1": "#E8950A", "Lote 2": "#DB2777", "Lote 3": "#7C3AED", "Lote 4": "#DC2626", "Lote 5": "#0891B2", "Lote 6": "#EA580C", "Lote 13": "#059669" };
 
   const lotesSorted = [...data.lotes].filter(l => l.cabras > 0).sort((a, b) => b.cabras - a.cabras);
   const totalCabras = data.cabras.length;
@@ -510,7 +573,7 @@ function DashboardPage({ data }) {
           <Card>
             <SectionTitle icon="📊" text={`Distribución por Lotes (${totalCabras} cabras)`} />
             {lotesSorted.map((l, i) => {
-              const color = Object.entries(LOTE_COLORS).find(([k]) => l.nombre.includes(k))?.[1] || "#64748B";
+              const color = LOTE_COLORS[l.nombre] || "#64748B";
               return <div key={i} style={{ display: "flex", alignItems: "center", gap: 11, padding: "7px 0" }}>
                 <div style={{ width: 9, height: 9, borderRadius: "50%", background: color }} />
                 <div style={{ flex: 1 }}>
@@ -842,16 +905,12 @@ function ImportadorPage({ data, refresh }) {
     const errorList = [];
 
     // Map FLM group names to our lote names
+    // Extract lote number from first digits of grupo name
     const mapGrupo = (g) => {
       if (!g) return null;
-      if (g.includes("1 LOTE 1") || (g.includes("Manada 1") && !g.includes("13"))) return "Lote 1";
-      if (g.includes("13 PARIDERA") || g.includes("13")) return "Grupo 13";
-      if (g.includes("2 LOTE 2") || g.includes("Manada 2")) return "Lote 2";
-      if (g.includes("3 LOTE 3") || g.includes("Manada 3")) return "Lote 3";
-      if (g.includes("BAJA PRODUCCION") || g.includes("4 BAJA") || g.includes("Manada 4")) return "Lote 4";
-      if (g.includes("CHOTAS") || g.includes("5 CHOTAS") || g.includes("Manada 5")) return "Lote 5";
-      if (g.includes("6 LOTE 6") || g.includes("Manada 6")) return "Lote 6";
-      return null;
+      const match = g.match(/^(\d+)/);
+      if (!match) return null;
+      return `Lote ${match[1]}`;
     };
 
     for (const row of dataRows) {
@@ -878,7 +937,13 @@ function ImportadorPage({ data, refresh }) {
         // If not found, create it
         if (!cabra) {
           const loteName = mapGrupo(grupo);
-          const lote = loteName ? data.lotes.find(l => l.nombre === loteName) : null;
+          let lote = loteName ? data.lotes.find(l => l.nombre === loteName) : null;
+          if (!lote && loteName) {
+            const { data: created } = await supabase.from("lote").insert([{
+              nombre: loteName, tipo: "alta_produccion", descripcion: grupo
+            }]).select().single();
+            if (created) { lote = created; data.lotes.push({ ...created, cabras: 0 }); }
+          }
           const { data: newC, error: errC } = await supabase.from("cabra").insert([{
             crotal, estado: "lactacion", sexo: "hembra", raza: "Murciano-Granadina",
             num_lactaciones: lactacion, dias_en_leche: del_dias,
@@ -893,7 +958,17 @@ function ImportadorPage({ data, refresh }) {
         // Check if lote changed
         const loteName = mapGrupo(grupo);
         if (loteName) {
-          const newLote = data.lotes.find(l => l.nombre === loteName);
+          let newLote = data.lotes.find(l => l.nombre === loteName);
+          // Create lote if it doesn't exist
+          if (!newLote) {
+            const { data: created } = await supabase.from("lote").insert([{
+              nombre: loteName, tipo: "alta_produccion", descripcion: grupo
+            }]).select().single();
+            if (created) {
+              newLote = created;
+              data.lotes.push({ ...created, cabras: 0 });
+            }
+          }
           if (newLote && cabra.lote_id !== newLote.id) {
             await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
             loteChanges++;
@@ -1090,18 +1165,115 @@ function ImportadorPage({ data, refresh }) {
 
 function ConsultasPage({ data }) {
   const [q, setQ] = useState("");
-  const [ms, setMs] = useState([{ role: "assistant", text: "Pregúntame lo que quieras sobre tu granja. Consulto datos reales de Supabase y nunca invento." }]);
+  const [ms, setMs] = useState([{ role: "assistant", text: "Pregúntame lo que quieras sobre tu granja. Tengo acceso a todos los datos: producción, partos, ecografías, tratamientos, cubriciones, crías, lotes. Puedo cruzar cualquier dato." }]);
   const [ld, setLd] = useState(false);
-  const dataCtx = buildDataContext(data);
-  const send = async () => { 
-    if (!q.trim()) return; 
-    const userMsg = q;
-    setMs(p => [...p, { role: "user", text: userMsg }]); 
-    setQ(""); 
-    setLd(true);
+  
+  // Build rich context with cross-referenced data
+  const buildRichContext = (userMsg) => {
+    const msg = userMsg.toLowerCase();
+    let ctx = buildDataContext(data);
     
-    // Build specific context if asking about a specific goat
-    let specificCtx = dataCtx;
+    // Latest production indexed by cabra_id
+    const prod = data.produccion || [];
+    const latestDate = prod.length > 0 ? prod[0].fecha : null;
+    const todayProd = latestDate ? prod.filter(p => p.fecha === latestDate) : [];
+    const prodByCabraId = {};
+    todayProd.forEach(p => { prodByCabraId[p.cabra_id] = p; });
+    
+    // Always include: partos with abortos + production cross-reference
+    const abortos = data.partos.filter(p => p.tipo === "aborto");
+    if (abortos.length > 0) {
+      ctx += `\n\nABORTOS REGISTRADOS (${abortos.length}):`;
+      abortos.forEach(a => {
+        const cabra = data.cabras.find(c => c.crotal === a.cabra?.crotal);
+        const prodC = cabra ? prodByCabraId[cabra.id] : null;
+        ctx += `\n  ${a.cabra?.crotal || '?'}: ${a.fecha} (${a.paridera?.nombre || '?'})`;
+        if (prodC) ctx += ` → Producción actual: ${prodC.litros}L/día, DEL=${prodC.dia_lactacion}, Lact=${prodC.lactacion_num}`;
+        else if (cabra) ctx += ` → Lote: ${cabra.lote?.nombre || '?'}, Estado: ${cabra.estado}`;
+      });
+    }
+    
+    // Always include: doble vacías with production
+    const vaciasByC = {};
+    data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
+      const cr = e.cabra?.crotal;
+      if (cr) { if (!vaciasByC[cr]) vaciasByC[cr] = []; vaciasByC[cr].push(e); }
+    });
+    const dobleVacias = Object.entries(vaciasByC).filter(([, arr]) => arr.length >= 2);
+    if (dobleVacias.length > 0) {
+      ctx += `\n\nCABRAS VACÍAS EN 2+ ECOGRAFÍAS (${dobleVacias.length}):`;
+      dobleVacias.forEach(([cr, ecos]) => {
+        const cabra = data.cabras.find(c => c.crotal === cr);
+        const prodC = cabra ? prodByCabraId[cabra.id] : null;
+        ctx += `\n  ${cr}: ${ecos.map(e => `${e.fecha} ${e.paridera?.nombre || ''}`).join(', ')}`;
+        if (prodC) ctx += ` → ${prodC.litros}L/día`;
+        if (cabra) ctx += ` (${cabra.lote?.nombre || '?'})`;
+      });
+    }
+    
+    // Include production data when relevant
+    if (msg.includes("produc") || msg.includes("leche") || msg.includes("litro") || msg.includes("mejor") || msg.includes("peor") || msg.includes("rendimiento") || msg.includes("descart") || msg.includes("matadero")) {
+      const sorted = [...todayProd].sort((a, b) => (b.litros || 0) - (a.litros || 0));
+      if (sorted.length > 0) {
+        ctx += `\n\nPRODUCCIÓN DEL DÍA ${latestDate} (${sorted.length} cabras, ${sorted.reduce((s, p) => s + (p.litros || 0), 0).toFixed(1)}L total):`;
+        ctx += `\nTOP 20:`;
+        sorted.slice(0, 20).forEach(p => {
+          const cabra = data.cabras.find(c => c.id === p.cabra_id);
+          ctx += `\n  ${cabra?.crotal || '?'}: ${p.litros}L, DEL=${p.dia_lactacion}, Lact=${p.lactacion_num}, LitTotal=${p.litros_totales_lactacion}, Cond=${p.conductividad}, Lote=${cabra?.lote?.nombre || '?'}`;
+        });
+        ctx += `\nPEORES 20:`;
+        sorted.slice(-20).reverse().forEach(p => {
+          const cabra = data.cabras.find(c => c.id === p.cabra_id);
+          ctx += `\n  ${cabra?.crotal || '?'}: ${p.litros}L, DEL=${p.dia_lactacion}, Lact=${p.lactacion_num}, LitTotal=${p.litros_totales_lactacion}, Cond=${p.conductividad}, Lote=${cabra?.lote?.nombre || '?'}`;
+        });
+      }
+    }
+    
+    // Include partos data when relevant
+    if (msg.includes("parto") || msg.includes("parid") || msg.includes("aborto") || msg.includes("cría") || msg.includes("nacimi") || msg.includes("febrero") || msg.includes("mayo") || msg.includes("octubre")) {
+      ctx += `\n\nPARTOS (${data.partos.length} registros):`;
+      const byParidera = {};
+      data.partos.forEach(p => { const pn = p.paridera?.nombre || "Sin paridera"; if (!byParidera[pn]) byParidera[pn] = []; byParidera[pn].push(p); });
+      Object.entries(byParidera).forEach(([pn, partos]) => {
+        const normales = partos.filter(p => p.tipo === "normal").length;
+        const abortosP = partos.filter(p => p.tipo === "aborto").length;
+        ctx += `\n  ${pn}: ${partos.length} partos (${normales} normales, ${abortosP} abortos)`;
+        partos.forEach(p => {
+          const cabra = data.cabras.find(c => c.crotal === p.cabra?.crotal);
+          const prodC = cabra ? prodByCabraId[cabra.id] : null;
+          ctx += `\n    ${p.cabra?.crotal || '?'}: ${p.fecha}, ${p.tipo}, ${p.num_crias} crías (${p.num_hembras}H ${p.num_machos}M)`;
+          if (prodC) ctx += ` → Prod actual: ${prodC.litros}L/día`;
+        });
+      });
+    }
+    
+    // Include ecografías when relevant
+    if (msg.includes("ecograf") || msg.includes("vacía") || msg.includes("vacia") || msg.includes("gestante") || msg.includes("preñada")) {
+      ctx += `\n\nECOGRAFÍAS (${data.ecografias.length} registros):`;
+      const byParidera = {};
+      data.ecografias.forEach(e => { const pn = e.paridera?.nombre || "Sin paridera"; if (!byParidera[pn]) byParidera[pn] = []; byParidera[pn].push(e); });
+      Object.entries(byParidera).forEach(([pn, ecos]) => {
+        const gestantes = ecos.filter(e => e.resultado === "gestante" || e.resultado === "prenada").length;
+        const vacias = ecos.filter(e => e.resultado === "vacia").length;
+        ctx += `\n  ${pn}: ${ecos.length} ecos (${gestantes} gestantes, ${vacias} vacías)`;
+        ecos.forEach(e => {
+          ctx += `\n    ${e.cabra?.crotal || '?'}: ${e.fecha}, ${e.resultado}`;
+        });
+      });
+    }
+    
+    // Include lote details when relevant
+    if (msg.includes("lote") || msg.includes("grupo") || msg.includes("manada") || msg.includes("distribu")) {
+      ctx += `\n\nDETALLE POR LOTE:`;
+      data.lotes.filter(l => l.cabras > 0).sort((a, b) => b.cabras - a.cabras).forEach(l => {
+        const loteProd = todayProd.filter(p => { const c = data.cabras.find(cc => cc.id === p.cabra_id); return c && c.lote_id === l.id; });
+        const totalL = loteProd.reduce((s, p) => s + (p.litros || 0), 0);
+        const mediaL = loteProd.length > 0 ? totalL / loteProd.length : 0;
+        ctx += `\n  ${l.nombre}: ${l.cabras} cabras, ${totalL.toFixed(1)}L total, ${mediaL.toFixed(2)}L/cabra media`;
+      });
+    }
+    
+    // Specific goat lookup
     const crotalMatch = userMsg.match(/\b(\d{5,6})\b/);
     if (crotalMatch) {
       const crotal = crotalMatch[1];
@@ -1111,17 +1283,29 @@ function ConsultasPage({ data }) {
       const tratsC = data.tratamientos.filter(t => t.cabra?.crotal === crotal);
       const cubsC = data.cubriciones.filter(c => c.cabra?.crotal === crotal);
       const criasC = data.crias.filter(c => c.madre?.crotal === crotal);
-      specificCtx += `\n\nDATOS ESPECÍFICOS DE CABRA ${crotal}:`;
-      if (cabra) specificCtx += `\nEstado: ${cabra.estado}, Lote: ${cabra.lote?.nombre || '-'}, Lactaciones: ${cabra.num_lactaciones || '-'}, DEL: ${cabra.dias_en_leche || '-'}, Edad meses: ${cabra.edad_meses || '-'}, Estado gine: ${cabra.estado_ginecologico || '-'}`;
-      if (partosC.length > 0) specificCtx += `\nPartos (${partosC.length}): ${partosC.map(p => `${p.fecha} - ${p.num_crias} crías (${p.num_machos}M ${p.num_hembras}H) ${p.tipo}`).join('; ')}`;
-      if (ecosC.length > 0) specificCtx += `\nEcografías (${ecosC.length}): ${ecosC.map(e => `${e.fecha} - ${e.resultado} (${e.paridera?.nombre || '-'})`).join('; ')}`;
-      if (tratsC.length > 0) specificCtx += `\nTratamientos (${tratsC.length}): ${tratsC.map(t => `${t.fecha} - ${t.tipo} ${t.producto || ''}`).join('; ')}`;
-      if (cubsC.length > 0) specificCtx += `\nCubriciones (${cubsC.length}): ${cubsC.map(c => `${c.fecha_entrada} - ${c.metodo} (${c.paridera?.nombre || '-'})`).join('; ')}`;
-      if (criasC.length > 0) specificCtx += `\nCrías hembra: ${criasC.map(c => `peseta ${c.peseta} (${c.fecha_nacimiento})`).join(', ')}`;
-      if (!cabra) specificCtx += `\nEsta cabra NO existe en el sistema.`;
+      const prodC = cabra ? prodByCabraId[cabra.id] : null;
+      ctx += `\n\nFICHA COMPLETA CABRA ${crotal}:`;
+      if (cabra) ctx += `\nEstado: ${cabra.estado}, Lote: ${cabra.lote?.nombre || '-'}, Lactaciones: ${cabra.num_lactaciones || '-'}, DEL: ${cabra.dias_en_leche || '-'}, Edad: ${cabra.edad_meses || '-'} meses`;
+      if (prodC) ctx += `\nProducción hoy: ${prodC.litros}L, Prom10d: ${prodC.promedio_10d || prodC.media_10d || '-'}, LitTotales: ${prodC.litros_totales_lactacion}, Conductividad: ${prodC.conductividad}, Flujo: ${prodC.flujo}, Tiempo: ${prodC.tiempo_ordeno}min`;
+      if (partosC.length > 0) ctx += `\nPartos (${partosC.length}): ${partosC.map(p => `${p.fecha} ${p.tipo} ${p.num_crias}crías`).join('; ')}`;
+      if (ecosC.length > 0) ctx += `\nEcografías (${ecosC.length}): ${ecosC.map(e => `${e.fecha} ${e.resultado}`).join('; ')}`;
+      if (tratsC.length > 0) ctx += `\nTratamientos (${tratsC.length}): ${tratsC.map(t => `${t.fecha} ${t.tipo} ${t.producto || ''}`).join('; ')}`;
+      if (cubsC.length > 0) ctx += `\nCubriciones (${cubsC.length}): ${cubsC.map(c => `${c.fecha_entrada} ${c.metodo}`).join('; ')}`;
+      if (criasC.length > 0) ctx += `\nCrías: ${criasC.map(c => `peseta ${c.peseta}`).join(', ')}`;
+      if (!cabra) ctx += `\nEsta cabra NO existe en el sistema.`;
     }
     
-    const response = await askClaude(userMsg, specificCtx);
+    return ctx;
+  };
+  
+  const send = async () => { 
+    if (!q.trim()) return; 
+    const userMsg = q;
+    setMs(p => [...p, { role: "user", text: userMsg }]); 
+    setQ(""); 
+    setLd(true);
+    const ctx = buildRichContext(userMsg);
+    const response = await askClaude(userMsg, ctx);
     setMs(p => [...p, { role: "assistant", text: response }]);
     setLd(false);
   };
@@ -1134,7 +1318,11 @@ function ConsultasPage({ data }) {
           <span style={{ fontSize: 13, fontWeight: 700 }}>Asistente Peñas Cercadas</span>
         </div>
         <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-          {ms.map((m, i) => <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: "80%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>{m.text}</div>)}
+          {ms.map((m, i) => (
+            <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: m.role === "user" ? "80%" : "90%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
+              {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+            </div>
+          ))}
           {ld && <div style={{ alignSelf: "flex-start", padding: "13px 17px", background: "#F8FAFC", borderRadius: 13, border: "1px solid #F1F5F9" }}><div style={{ display: "flex", gap: 5 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "#E8950A", animation: `bounce 1.4s ease ${i * .2}s infinite`, opacity: .5 }} />)}</div></div>}
         </div>
         <div style={{ padding: "13px 16px", borderTop: "1px solid #F1F5F9", display: "flex", gap: 10 }}>

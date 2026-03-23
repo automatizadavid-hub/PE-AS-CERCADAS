@@ -869,6 +869,7 @@ function ImportadorPage({ data, refresh }) {
   const [rawRows, setRawRows] = useState(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | null
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
@@ -1122,9 +1123,64 @@ function ImportadorPage({ data, refresh }) {
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 
+  // Import veterinary annotations (2 columns: Crotal + Anotación)
+  const importAnotaciones = async (rows) => {
+    setImporting(true);
+    setImportResult(null);
+    const header = rows[0];
+    // Detect which column is crotal and which is text
+    const h0 = normalizeText(header[0] || "");
+    const h1 = normalizeText(header[1] || "");
+    const crotalCol = (h0.includes("crotal") || h0.includes("identificador") || h0.includes("animal") || h0.includes("id")) ? 0 : 1;
+    const textoCol = crotalCol === 0 ? 1 : 0;
+
+    setMs(p => [...p, { role: "assistant", text: `📋 Importando anotaciones...\nColumna crotal: "${header[crotalCol]}"\nColumna texto: "${header[textoCol]}"` }]);
+
+    const dataRows = rows.slice(1).filter(r => r[crotalCol]?.trim() && r[textoCol]?.trim());
+    const today = new Date().toISOString().split("T")[0];
+    let imported = 0, errors = 0;
+    const errorList = [];
+
+    for (const row of dataRows) {
+      try {
+        const crotal = row[crotalCol].trim();
+        const texto = row[textoCol].trim();
+        if (!texto) continue;
+
+        // Find cabra
+        const cabra = data.cabras.find(c => c.crotal === crotal);
+
+        const { error } = await supabase.from("anotacion_veterinaria").insert([{
+          cabra_id: cabra?.id || null,
+          fecha: today,
+          texto: texto,
+          tipo: cabra ? "individual" : "rebaño",
+          autor: "Veterinario (CSV)",
+        }]);
+
+        if (error) { errors++; errorList.push(`${crotal}: ${error.message}`); }
+        else imported++;
+      } catch (err) {
+        errors++;
+        errorList.push(`${row[crotalCol]}: ${err.message}`);
+      }
+    }
+
+    setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "anotaciones" });
+    setImporting(false);
+    refresh();
+
+    let chatMsg = `✅ Anotaciones importadas:\n• ${imported}/${dataRows.length} anotaciones guardadas`;
+    if (errors > 0) chatMsg += `\n• 🔴 ${errors} errores:\n${errorList.slice(0, 5).map(e => `  - ${e}`).join("\n")}`;
+    const sinCabra = dataRows.filter(r => !data.cabras.find(c => c.crotal === r[crotalCol].trim())).length;
+    if (sinCabra > 0) chatMsg += `\n• ⚠️ ${sinCabra} crotales no encontrados en la base de datos (se guardaron como anotación general)`;
+    setMs(p => [...p, { role: "assistant", text: chatMsg }]);
+  };
+
   const readFile = async (file) => {
     setFileName(file.name);
     setImportResult(null);
+    setCsvType(null);
     try {
       const text = await readFileText(file);
       const rows = parseCSV(text);
@@ -1132,22 +1188,8 @@ function ImportadorPage({ data, refresh }) {
       setRawRows(cleanRows);
       setFileData({ "Datos": cleanRows.slice(0, 60) });
       
-      const preview = cleanRows.slice(0, 10).map(r => r.join(" | ")).join("\n");
-      setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${cleanRows.length} filas)` }]);
-      
-      if (isProductionCSV(cleanRows[0] || [])) {
-        const colMap = buildColumnMap(cleanRows[0]);
-        const colInfo = Object.entries(colMap).map(([k, v]) => `${k}→col${v}`).join(", ");
-        setMs(p => [...p, { role: "assistant", text: `✅ Informe FLM detectado: ${cleanRows.length - 1} cabras, ${Object.keys(colMap).length} columnas mapeadas.\n\n📊 Columnas: ${colInfo}\n\nPulsa "Importar a Supabase" para procesarlo.` }]);
-      } else {
-        setLd(true);
-        const response = await askClaude(
-          `Archivo: "${file.name}". Primeras filas:\n\n${preview}\n\nTotal: ${cleanRows.length}. Analiza e identifica qué datos son.`,
-          dataCtx
-        );
-        setMs(p => [...p, { role: "assistant", text: response }]);
-        setLd(false);
-      }
+      setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${cleanRows.length} filas, ${cleanRows[0]?.length || 0} columnas)` }]);
+      setMs(p => [...p, { role: "assistant", text: `Archivo cargado. Selecciona el tipo de datos:\n• 🥛 **Producción FLM** — informe diario de ordeño\n• 📋 **Anotaciones veterinarias** — crotal + observación\n\nUsa los botones de abajo para elegir.` }]);
     } catch (err) {
       setMs(p => [...p, { role: "assistant", text: `Error leyendo archivo: ${err.message}` }]);
     }
@@ -1171,7 +1213,7 @@ function ImportadorPage({ data, refresh }) {
     setLd(false);
   };
 
-  const canImport = rawRows && isProductionCSV(rawRows[0] || []);
+  const canImport = rawRows && csvType;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -1191,33 +1233,75 @@ function ImportadorPage({ data, refresh }) {
           </>)}
         </div>
 
+        {/* Type selector — only shown when file is loaded */}
+        {rawRows && !importResult && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#64748B", marginBottom: 8 }}>¿Qué tipo de datos contiene?</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => setCsvType("produccion")}
+                style={{
+                  padding: "14px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  border: csvType === "produccion" ? "2px solid #059669" : "2px solid #E2E8F0",
+                  background: csvType === "produccion" ? "#F0FDF4" : "#FFF",
+                  color: csvType === "produccion" ? "#059669" : "#64748B",
+                }}>
+                🥛 Producción FLM
+              </button>
+              <button onClick={() => setCsvType("anotaciones")}
+                style={{
+                  padding: "14px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  border: csvType === "anotaciones" ? "2px solid #0891B2" : "2px solid #E2E8F0",
+                  background: csvType === "anotaciones" ? "#F0F9FF" : "#FFF",
+                  color: csvType === "anotaciones" ? "#0891B2" : "#64748B",
+                }}>
+                📋 Anotaciones Vet
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Import button */}
         {canImport && !importResult && (
-          <button onClick={() => importProduction(rawRows)} disabled={importing}
+          <button onClick={() => csvType === "produccion" ? importProduction(rawRows) : importAnotaciones(rawRows)} disabled={importing}
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
-              background: importing ? "#94A3B8" : "linear-gradient(135deg, #059669, #047857)", color: "#FFF",
+              background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
             }}>
-            {importing ? "⏳ Importando..." : `🚀 Importar ${rawRows.length - 1} cabras a Supabase`}
+            {importing ? "⏳ Importando..." : csvType === "produccion" ? `🚀 Importar ${rawRows.length - 1} cabras a Supabase` : `📋 Importar ${rawRows.length - 1} anotaciones a Supabase`}
           </button>
         )}
 
         {importResult && (
           <Card style={{ marginTop: 14, background: importResult.errors > 0 ? "#FEF9EE" : "#F0FDF4", border: `1px solid ${importResult.errors > 0 ? "#FDE68A" : "#BBF7D0"}` }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", marginBottom: 10 }}>✅ Importación completada</div>
+            {importResult.tipo !== "anotaciones" && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 10 }}>
               <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
                 <div style={{ fontSize: 20, fontWeight: 700, color: "#059669" }}>{importResult.imported}</div>
                 <div style={{ fontSize: 10, color: "#94A3B8" }}>Importados</div>
               </div>
               <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
-                <div style={{ fontSize: 20, fontWeight: 700, color: "#E8950A" }}>{importResult.totalLitros.toFixed(0)}L</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#E8950A" }}>{importResult.totalLitros?.toFixed(0) || 0}L</div>
                 <div style={{ fontSize: 10, color: "#94A3B8" }}>Litros hoy</div>
               </div>
               <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
-                <div style={{ fontSize: 20, fontWeight: 700, color: "#7C3AED" }}>{importResult.loteChanges}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#7C3AED" }}>{importResult.loteChanges || 0}</div>
                 <div style={{ fontSize: 10, color: "#94A3B8" }}>Cambios lote</div>
               </div>
             </div>
-            {importResult.alertas.length > 0 && (
+            )}
+            {importResult.tipo === "anotaciones" && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 10 }}>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#0891B2" }}>{importResult.imported}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Anotaciones guardadas</div>
+              </div>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: importResult.errors > 0 ? "#DC2626" : "#059669" }}>{importResult.errors}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Errores</div>
+              </div>
+            </div>
+            )}
+            {importResult.alertas && importResult.alertas.length > 0 && (
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>🚨 Alertas ({importResult.alertas.length})</div>
                 {importResult.alertas.slice(0, 8).map((a, i) => (

@@ -888,7 +888,7 @@ function ImportadorPage({ data, refresh }) {
     // Remove BOM if present
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     // Check for encoding corruption markers
-    const hasCorruption = /Ã[€-¿]|â€|ï»¿|\uFFFD/.test(text.substring(0, 500));
+    const hasCorruption = /\u00C3[\u0080-\u00BF]|\u00E2\u0080|\uFFFD/.test(text.substring(0, 500));
     if (hasCorruption) {
       // Re-read as Windows-1252
       const buffer = await file.arrayBuffer();

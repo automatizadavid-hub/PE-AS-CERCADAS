@@ -121,7 +121,7 @@ function useSupabaseData() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR] = await Promise.all([
+      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR, anotacionesR, alertasSanR] = await Promise.all([
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre)"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
@@ -136,6 +136,8 @@ function useSupabaseData() {
         supabase.from("evento_calendario").select("*").order("fecha", { ascending: true }),
         supabase.from("produccion_leche").select("*").order("fecha", { ascending: false }).limit(15000),
         supabase.from("resumen_diario").select("*").order("fecha", { ascending: false }).limit(30),
+        supabase.from("anotacion_veterinaria").select("*, cabra:cabra_id(crotal)").order("fecha", { ascending: false }).limit(200),
+        supabase.from("alerta_sanitaria").select("*").order("fecha", { ascending: false }).limit(200),
       ]);
 
       // Process lotes with counts
@@ -160,6 +162,8 @@ function useSupabaseData() {
         eventos: eventosR.data || [],
         produccion: produccionR.data || [],
         resumenes: resumenR.data || [],
+        anotaciones: anotacionesR.data || [],
+        alertasSanitarias: alertasSanR.data || [],
       });
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -1534,7 +1538,7 @@ function ConfigPage({ data, refresh }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       {/* Tab selector */}
       <div style={{ display: "flex", gap: 4, background: "#F1F5F9", borderRadius: 12, padding: 4, width: "fit-content" }}>
-        {[{ id: "calendario", l: "📅 Calendario" }, { id: "reglas", l: "📏 Reglas" }, { id: "protocolo", l: "🏥 Protocolo" }, { id: "parametros", l: "⚙️ Parámetros" }].map(t =>
+        {[{ id: "calendario", l: "📅 Calendario" }, { id: "lotes", l: "🐐 Lotes" }, { id: "reglas", l: "📏 Reglas" }, { id: "protocolo", l: "🏥 Protocolo" }, { id: "parametros", l: "⚙️ Parámetros" }].map(t =>
           <button key={t.id} onClick={() => setCfgTab(t.id)} style={{ padding: "8px 18px", borderRadius: 9, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: cfgTab === t.id ? "#FFF" : "transparent", color: cfgTab === t.id ? "#E8950A" : "#64748B", boxShadow: cfgTab === t.id ? "0 1px 4px rgba(0,0,0,0.06)" : "none" }}>{t.l}</button>
         )}
       </div>
@@ -1665,6 +1669,64 @@ function ConfigPage({ data, refresh }) {
               <div style={{ fontSize: 11.5, color: "#78590A", lineHeight: 1.5 }}>
                 Puedes añadir eventos con el botón "Añadir" o decírselo al chat. Los eventos aparecen en el dashboard y en el calendario. Marca como completados los que ya hayas hecho.
               </div>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {cfgTab === "lotes" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
+          <Card>
+            <SectionTitle icon="🐐" text="Estado de los Lotes" />
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 16, lineHeight: 1.5 }}>
+              Asigna el estado de cada lote. Los lotes marcados como <span style={{ color: "#E8950A", fontWeight: 700 }}>"Secándose"</span> se excluyen del análisis de producción (pero siguen generando alertas de conductividad).
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {data.lotes.sort((a, b) => a.nombre.localeCompare(b.nombre)).map(lote => {
+                const estadoColors = { produccion: "#059669", secandose: "#E8950A", pariendo: "#7C3AED" };
+                const estadoLabels = { produccion: "En producción", secandose: "Secándose", pariendo: "Pariendo" };
+                const estadoIcons = { produccion: "🥛", secandose: "⏸️", pariendo: "🤱" };
+                return (
+                  <div key={lote.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 12, transition: "all .2s" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 10, background: `${estadoColors[lote.estado || "produccion"]}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+                        {estadoIcons[lote.estado || "produccion"]}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B" }}>{lote.nombre}</div>
+                        <div style={{ fontSize: 11, color: "#94A3B8" }}>{lote.cabras} cabras · {lote.descripcion || ""}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {["produccion", "secandose", "pariendo"].map(est => (
+                        <button key={est} onClick={async () => {
+                          await supabase.from("lote").update({ estado: est }).eq("id", lote.id);
+                          refresh();
+                        }} style={{
+                          padding: "6px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                          border: (lote.estado || "produccion") === est ? `2px solid ${estadoColors[est]}` : "1px solid #E2E8F0",
+                          background: (lote.estado || "produccion") === est ? `${estadoColors[est]}12` : "#FFF",
+                          color: (lote.estado || "produccion") === est ? estadoColors[est] : "#94A3B8",
+                        }}>
+                          {estadoLabels[est]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+          <div>
+            <Card style={{ background: "linear-gradient(135deg, #FEF9EE, #FFF7ED)", border: "1px solid #FDE68A" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", marginBottom: 10 }}>💡 Cómo funciona</div>
+              {[
+                "🥛 En producción: aparece en todos los análisis de rendimiento, alertas, rankings",
+                "⏸️ Secándose: se excluye del análisis de producción. Solo salta alerta si la conductividad es alta (posible mastitis)",
+                "🤱 Pariendo: incluido en análisis pero marcado como lote en paridera. Útil para control post-parto",
+              ].map((t, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: "#78590A", padding: "6px 0", borderBottom: i < 2 ? "1px solid #FDE68A40" : "none", lineHeight: 1.5 }}>{t}</div>
+              ))}
             </Card>
           </div>
         </div>
@@ -1820,13 +1882,23 @@ function ProduccionPage({ data }) {
   const previousDate = allDates[1] || null;
   const hasTwodays = allDates.length >= 2;
 
-  // Today's production
-  const todayProd = latestDate ? allProd.filter(p => p.fecha === latestDate) : [];
-  const prevProd = previousDate ? allProd.filter(p => p.fecha === previousDate) : [];
+  // Today's production (all, including secandose — for conductivity alerts)
+  const allTodayProd = latestDate ? allProd.filter(p => p.fecha === latestDate) : [];
+  const allPrevProd = previousDate ? allProd.filter(p => p.fecha === previousDate) : [];
 
-  // Daily summary from all production records (more accurate than resumen_diario)
+  // Filter: exclude "secandose" lotes from production analysis
+  const secandoseLoteIds = new Set(data.lotes.filter(l => l.estado === 'secandose').map(l => l.id));
+  const secandoseLoteNames = new Set(data.lotes.filter(l => l.estado === 'secandose').map(l => l.nombre));
+  const isInProduction = (cabra_id) => {
+    const cabra = data.cabras.find(c => c.id === cabra_id);
+    return cabra && !secandoseLoteIds.has(cabra.lote_id);
+  };
+  const todayProd = allTodayProd.filter(p => isInProduction(p.cabra_id));
+  const prevProd = allPrevProd.filter(p => isInProduction(p.cabra_id));
+
+  // Daily summary — only active production lotes
   const dailySummary = allDates.map(fecha => {
-    const dayProd = allProd.filter(p => p.fecha === fecha);
+    const dayProd = allProd.filter(p => p.fecha === fecha && isInProduction(p.cabra_id));
     const totalL = dayProd.reduce((s, p) => s + (p.litros || 0), 0);
     const cabras = dayProd.length;
     return {
@@ -1973,10 +2045,21 @@ function ProduccionPage({ data }) {
     cabras: stats.filter(s => s.litros >= b.min && s.litros < b.max).length,
   }));
 
-  // Health alerts from today's production
+  // Health alerts — conductivity from ALL cabras (including secandose), production from active only
   const healthAlerts = [];
-  stats.filter(s => s.conductividad > 6.0).sort((a, b) => b.conductividad - a.conductividad)
-    .forEach(s => healthAlerts.push({ tipo: "alta", msg: `${s.crotal}: conductividad ${s.conductividad.toFixed(2)} mS/cm`, icon: "🔴" }));
+  // Conductivity: check ALL cabras
+  const allCabraStats = {};
+  allTodayProd.forEach(p => {
+    const cabra = data.cabras.find(c => c.id === p.cabra_id);
+    if (!cabra) return;
+    allCabraStats[cabra.crotal] = { crotal: cabra.crotal, lote: cabra.lote?.nombre || "-", conductividad: p.conductividad || 0, litros: p.litros || 0 };
+  });
+  Object.values(allCabraStats).filter(s => s.conductividad > 6.0).sort((a, b) => b.conductividad - a.conductividad)
+    .forEach(s => {
+      const isSecando = secandoseLoteNames.has(s.lote);
+      healthAlerts.push({ tipo: "alta", msg: `${s.crotal}: conductividad ${s.conductividad.toFixed(2)} mS/cm${isSecando ? " (secándose)" : ""}`, icon: "🔴" });
+    });
+  // Production drops & flow: only active lotes
   stats.filter(s => s.promedio_10d > 0 && s.litros < s.promedio_10d * 0.65).sort((a, b) => (a.litros / a.promedio_10d) - (b.litros / b.promedio_10d))
     .forEach(s => healthAlerts.push({ tipo: "media", msg: `${s.crotal}: produce ${s.litros.toFixed(1)}L (prom: ${s.promedio_10d.toFixed(1)}L) → caída ${((1 - s.litros / s.promedio_10d) * 100).toFixed(0)}%`, icon: "📉" }));
   stats.filter(s => s.flujo > 0 && s.flujo < 0.1)
@@ -2338,11 +2421,442 @@ function ProduccionPage({ data }) {
 }
 
 // ==========================================
+// SANIDAD — Centro de Control Sanitario
+// ==========================================
+function SanidadPage({ data, refresh }) {
+  const [expandedCard, setExpandedCard] = useState(null);
+  const [showAddNote, setShowAddNote] = useState(false);
+  const [newNote, setNewNote] = useState({ cabra_crotal: "", texto: "", tipo: "individual" });
+  const [sanMsg, setSanMsg] = useState("");
+  const [sanMsgs, setSanMsgs] = useState([{ role: "assistant", text: "Soy el asistente sanitario de Peñas Cercadas. Puedo analizar patrones de enfermedad, correlacionar conductividad con parideras, evaluar anotaciones del veterinario, y proponerte hipótesis de manejo. Pregúntame lo que quieras." }]);
+  const [sanLd, setSanLd] = useState(false);
+  const dataCtx = buildDataContext(data);
+
+  // =============================================
+  // DATA ANALYSIS
+  // =============================================
+  const allProd = data.produccion || [];
+  const allDates = [...new Set(allProd.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
+  const latestDate = allDates[0] || null;
+  const prevDate = allDates[1] || null;
+  const todayProd = latestDate ? allProd.filter(p => p.fecha === latestDate) : [];
+  const prevProd = prevDate ? allProd.filter(p => p.fecha === prevDate) : [];
+
+  const secandoseLoteIds = new Set(data.lotes.filter(l => l.estado === 'secandose').map(l => l.id));
+
+  // 1. CONDUCTIVIDAD ALTA — todas las cabras (incluidas secándose)
+  const highCond = todayProd.map(p => {
+    const cabra = data.cabras.find(c => c.id === p.cabra_id);
+    if (!cabra || !p.conductividad || p.conductividad <= 6.0) return null;
+    const prevR = prevProd.find(pp => pp.cabra_id === p.cabra_id);
+    const paridera = data.cubriciones.find(cu => cu.cabra_id === p.cabra_id);
+    return {
+      crotal: cabra.crotal, cabra_id: p.cabra_id,
+      conductividad: p.conductividad,
+      condAyer: prevR?.conductividad || null,
+      litros: p.litros || 0,
+      lote: cabra.lote?.nombre || "-",
+      lote_id: cabra.lote_id,
+      del: p.dia_lactacion || 0,
+      lactacion: p.lactacion_num || 0,
+      isSecando: secandoseLoteIds.has(cabra.lote_id),
+      paridera: paridera?.paridera?.nombre || null,
+    };
+  }).filter(Boolean).sort((a, b) => b.conductividad - a.conductividad);
+
+  // Pattern detection: cluster by lote or paridera
+  const condByLote = {};
+  highCond.forEach(c => { condByLote[c.lote] = (condByLote[c.lote] || 0) + 1; });
+  const condByParidera = {};
+  highCond.filter(c => c.paridera).forEach(c => { condByParidera[c.paridera] = (condByParidera[c.paridera] || 0) + 1; });
+
+  const condPatterns = [];
+  Object.entries(condByLote).forEach(([lote, count]) => {
+    if (count >= 3) condPatterns.push({ tipo: "cluster_lote", msg: `${count} cabras con conductividad alta en ${lote} — posible problema de manejo o ambiente en ese lote`, lote, count });
+  });
+  Object.entries(condByParidera).forEach(([paridera, count]) => {
+    if (count >= 3) condPatterns.push({ tipo: "cluster_paridera", msg: `${count} cabras con conductividad alta de la ${paridera} — revisar manejo post-parto`, paridera, count });
+  });
+
+  // 2. CANDIDATAS A DESCARTE
+  const activeProd = todayProd.filter(p => {
+    const cabra = data.cabras.find(c => c.id === p.cabra_id);
+    return cabra && !secandoseLoteIds.has(cabra.lote_id);
+  });
+  const cullCandidates = activeProd.map(p => {
+    const cabra = data.cabras.find(c => c.id === p.cabra_id);
+    if (!cabra) return null;
+    const litros = p.litros || 0;
+    const lactacion = p.lactacion_num || 0;
+    const del = p.dia_lactacion || 0;
+    if (litros >= 1.5 || lactacion < 3 || del < 60) return null;
+    // Check doble vacía
+    const vaciaCount = data.ecografias.filter(e => e.cabra_id === cabra.id && e.resultado === "vacia").length;
+    return { crotal: cabra.crotal, litros, lactacion, del, lote: cabra.lote?.nombre || "-", vaciaCount };
+  }).filter(Boolean).sort((a, b) => a.litros - b.litros);
+
+  // 3. DOBLE VACÍAS
+  const vaciasByC = {};
+  data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
+    const cr = e.cabra?.crotal;
+    if (cr) vaciasByC[cr] = (vaciasByC[cr] || 0) + 1;
+  });
+  const dobleVacias = Object.entries(vaciasByC).filter(([, c]) => c >= 2).map(([cr, count]) => {
+    const cabra = data.cabras.find(c => c.crotal === cr);
+    return { crotal: cr, count, lote: cabra?.lote?.nombre || "-", estado: cabra?.estado || "-" };
+  });
+
+  // 4. CABRAS CON CONDUCTIVIDAD EN AUMENTO (2+ días)
+  const condRising = [];
+  if (allDates.length >= 2) {
+    todayProd.forEach(p => {
+      if (!p.conductividad || p.conductividad <= 5.5) return;
+      const cabra = data.cabras.find(c => c.id === p.cabra_id);
+      if (!cabra) return;
+      const prev = prevProd.find(pp => pp.cabra_id === p.cabra_id);
+      if (prev && prev.conductividad && p.conductividad > prev.conductividad && (p.conductividad - prev.conductividad) > 0.3) {
+        condRising.push({
+          crotal: cabra.crotal, lote: cabra.lote?.nombre || "-",
+          condHoy: p.conductividad, condAyer: prev.conductividad,
+          subida: p.conductividad - prev.conductividad,
+        });
+      }
+    });
+    condRising.sort((a, b) => b.subida - a.subida);
+  }
+
+  // 5. ANOTACIONES VETERINARIAS
+  const anotaciones = data.anotaciones || [];
+
+  // 6. ALERTAS PERSISTENTES
+  const alertasPersistentes = data.alertasSanitarias || [];
+  const alertasActivas = alertasPersistentes.filter(a => a.estado === "activa");
+
+  // Chat sanitario
+  const sendSan = async () => {
+    if (!sanMsg.trim()) return;
+    const userMsg = sanMsg;
+    setSanMsgs(p => [...p, { role: "user", text: userMsg }]); setSanMsg(""); setSanLd(true);
+    const sanCtx = dataCtx + `\n\nDATOS SANITARIOS:\nCabras conductividad >6.0: ${highCond.length} (${highCond.slice(0, 15).map(c => `${c.crotal}: ${c.conductividad.toFixed(2)} mS/cm [${c.lote}]`).join("; ")})\nPatrones detectados: ${condPatterns.map(p => p.msg).join("; ") || "ninguno"}\nConductividad en aumento: ${condRising.slice(0, 10).map(c => `${c.crotal}: ${c.condAyer.toFixed(2)}→${c.condHoy.toFixed(2)}`).join("; ") || "ninguna"}\nCandidatas descarte: ${cullCandidates.length} (${cullCandidates.slice(0, 10).map(c => `${c.crotal}: ${c.litros.toFixed(1)}L, L${c.lactacion}`).join("; ")})\nDoble vacías: ${dobleVacias.map(d => `${d.crotal} (${d.count}x)`).join(", ") || "ninguna"}\nAnotaciones vet recientes: ${anotaciones.slice(0, 10).map(a => `[${a.fecha}] ${a.cabra?.crotal || "general"}: ${a.texto}`).join("; ") || "ninguna"}\n\nAl analizar estos datos, busca correlaciones entre conductividad alta y parideras, lotes, o tratamientos. Propón hipótesis de manejo y recomendaciones prácticas.`;
+    const response = await askClaude(userMsg, sanCtx, "general");
+    setSanMsgs(p => [...p, { role: "assistant", text: response }]);
+    setSanLd(false);
+  };
+
+  // Save veterinary note
+  const saveNote = async () => {
+    if (!newNote.texto.trim()) return;
+    let cabra_id = null;
+    if (newNote.cabra_crotal.trim()) {
+      const cabra = data.cabras.find(c => c.crotal === newNote.cabra_crotal.trim());
+      if (cabra) cabra_id = cabra.id;
+    }
+    await supabase.from("anotacion_veterinaria").insert([{
+      cabra_id, fecha: new Date().toISOString().split("T")[0],
+      texto: newNote.texto, tipo: newNote.tipo, autor: "Veterinario",
+    }]);
+    setNewNote({ cabra_crotal: "", texto: "", tipo: "individual" });
+    setShowAddNote(false);
+    refresh();
+  };
+
+  // Resolve alert
+  const resolveAlert = async (id) => {
+    await supabase.from("alerta_sanitaria").update({ estado: "resuelta", resolved_at: new Date().toISOString() }).eq("id", id);
+    refresh();
+  };
+
+  // Auto-generate and persist alerts from data patterns
+  const generateAlerts = async () => {
+    const newAlerts = [];
+    const today = new Date().toISOString().split("T")[0];
+    // Check if already generated today
+    const todayAlerts = alertasPersistentes.filter(a => a.fecha === today);
+    if (todayAlerts.length > 0) return; // Already generated
+
+    if (condPatterns.length > 0) {
+      condPatterns.forEach(p => {
+        newAlerts.push({
+          fecha: today, tipo: "conductividad", severidad: "alta",
+          titulo: `Cluster conductividad: ${p.lote || p.paridera}`,
+          descripcion: p.msg,
+          cabras_afectadas: highCond.filter(c => c.lote === p.lote || c.paridera === p.paridera).map(c => c.crotal),
+          lote_nombre: p.lote || null, paridera_nombre: p.paridera || null,
+        });
+      });
+    }
+    if (cullCandidates.length >= 5) {
+      newAlerts.push({
+        fecha: today, tipo: "descarte", severidad: "media",
+        titulo: `${cullCandidates.length} candidatas a descarte`,
+        descripcion: `Cabras con <1.5L, ≥3 lactaciones, >60 DEL. Revisar para decisión productiva.`,
+        cabras_afectadas: cullCandidates.slice(0, 20).map(c => c.crotal),
+      });
+    }
+    if (newAlerts.length > 0) {
+      await supabase.from("alerta_sanitaria").insert(newAlerts);
+      refresh();
+    }
+  };
+
+  useEffect(() => { if (todayProd.length > 0) generateAlerts(); }, [latestDate]);
+
+  // Card toggle
+  const toggle = (id) => setExpandedCard(expandedCard === id ? null : id);
+
+  // Summary cards data
+  const cards = [
+    { id: "conductividad", icon: "🔬", title: "Conductividad Alta", count: highCond.length, color: "#DC2626", severity: highCond.length > 5 ? "alta" : highCond.length > 0 ? "media" : "ok", sub: highCond.length > 0 ? `Máx: ${highCond[0]?.conductividad.toFixed(2)} mS/cm` : "Todo normal" },
+    { id: "patrones", icon: "🔍", title: "Patrones Detectados", count: condPatterns.length + (condRising.length > 0 ? 1 : 0), color: "#7C3AED", severity: condPatterns.length > 0 ? "alta" : "ok", sub: condPatterns.length > 0 ? condPatterns[0].msg.substring(0, 60) + "..." : "Sin patrones anómalos" },
+    { id: "descarte", icon: "⚠️", title: "Candidatas Descarte", count: cullCandidates.length, color: "#E8950A", severity: cullCandidates.length > 10 ? "alta" : cullCandidates.length > 0 ? "media" : "ok", sub: cullCandidates.length > 0 ? `Peor: ${cullCandidates[0]?.crotal} (${cullCandidates[0]?.litros.toFixed(1)}L)` : "Ninguna" },
+    { id: "vacias", icon: "🔴", title: "Doble Vacías", count: dobleVacias.length, color: "#DB2777", severity: dobleVacias.length > 3 ? "alta" : dobleVacias.length > 0 ? "media" : "ok", sub: dobleVacias.length > 0 ? `${dobleVacias.map(d => d.crotal).slice(0, 3).join(", ")}` : "Ninguna" },
+    { id: "notas", icon: "📋", title: "Anotaciones Veterinarias", count: anotaciones.length, color: "#0891B2", severity: "info", sub: anotaciones.length > 0 ? `Última: ${anotaciones[0]?.fecha}` : "Sin anotaciones" },
+    { id: "alertas", icon: "🚨", title: "Alertas Activas", count: alertasActivas.length, color: "#DC2626", severity: alertasActivas.length > 0 ? "alta" : "ok", sub: alertasActivas.length > 0 ? alertasActivas[0].titulo : "Sin alertas pendientes" },
+  ];
+
+  const sevBorder = { alta: "#FECACA", media: "#FDE68A", ok: "#BBF7D0", info: "#BAE6FD" };
+  const sevBg = { alta: "#FEF2F2", media: "#FEF9EE", ok: "#F0FDF4", info: "#F0F9FF" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      {/* Summary grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+        {cards.map(card => (
+          <div key={card.id} onClick={() => toggle(card.id)}
+            style={{
+              background: sevBg[card.severity], border: `2px solid ${sevBorder[card.severity]}`,
+              borderRadius: 16, padding: "18px 22px", cursor: "pointer", transition: "all .25s",
+              boxShadow: expandedCard === card.id ? `0 8px 24px ${card.color}20` : "none",
+              transform: expandedCard === card.id ? "translateY(-2px)" : "none",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${card.color}15`; }}
+            onMouseLeave={e => { if (expandedCard !== card.id) { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; } }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 20 }}>{card.icon}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#1E293B" }}>{card.title}</span>
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: card.color, fontFamily: "'Space Mono', monospace" }}>{card.count}</div>
+            </div>
+            <div style={{ fontSize: 11.5, color: "#64748B", lineHeight: 1.4 }}>{card.sub}</div>
+            <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 6 }}>{expandedCard === card.id ? "▲ Clic para cerrar" : "▼ Clic para ver detalle"}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Expanded detail panels */}
+      {expandedCard === "conductividad" && (
+        <Card style={{ border: "2px solid #FECACA", animation: "fadeSlideIn .3s" }}>
+          <SectionTitle icon="🔬" text={`Conductividad Alta — ${highCond.length} cabras >6.0 mS/cm`} color="#DC2626" />
+          {condPatterns.length > 0 && (
+            <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: 14, marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>🔍 Patrones detectados</div>
+              {condPatterns.map((p, i) => <div key={i} style={{ fontSize: 12, color: "#7F1D1D", lineHeight: 1.5 }}>→ {p.msg}</div>)}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {highCond.map((c, i) => (
+              <div key={i} style={{ background: c.conductividad > 6.5 ? "#FEF2F2" : "#FFFBEB", border: `1px solid ${c.conductividad > 6.5 ? "#FECACA" : "#FDE68A"}`, borderRadius: 10, padding: "10px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#1E293B" }}>{c.crotal}</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: c.conductividad > 6.5 ? "#DC2626" : "#E8950A", fontFamily: "'Space Mono', monospace" }}>{c.conductividad.toFixed(2)}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3 }}>
+                  {c.lote}{c.isSecando ? " (secándose)" : ""} · L{c.lactacion} · {c.litros.toFixed(1)}L
+                  {c.condAyer && <span> · Ayer: {c.condAyer.toFixed(2)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {expandedCard === "patrones" && (
+        <Card style={{ border: "2px solid #DDD6FE", animation: "fadeSlideIn .3s" }}>
+          <SectionTitle icon="🔍" text="Patrones y Tendencias" color="#7C3AED" />
+          {condPatterns.length === 0 && condRising.length === 0 && (
+            <div style={{ textAlign: "center", padding: 20, color: "#94A3B8" }}>No se han detectado patrones anómalos. Importa más días para un análisis más profundo.</div>
+          )}
+          {condPatterns.map((p, i) => (
+            <div key={i} style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED", marginBottom: 4 }}>🔗 {p.tipo === "cluster_lote" ? `Cluster en ${p.lote}` : `Cluster en ${p.paridera}`}</div>
+              <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}>{p.msg}</div>
+              <div style={{ fontSize: 11, color: "#7C3AED", marginTop: 6, fontWeight: 600 }}>💡 Recomendación: revisar higiene de ordeño, rutina de secado, y estado de pezoneras en ese grupo.</div>
+            </div>
+          ))}
+          {condRising.length > 0 && (
+            <div style={{ marginTop: condPatterns.length > 0 ? 14 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED", marginBottom: 10 }}>📈 Conductividad en aumento ({condRising.length} cabras)</div>
+              {condRising.slice(0, 12).map((c, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F1F5F9" }}>
+                  <div>
+                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono', monospace" }}>{c.crotal}</span>
+                    <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: 6 }}>{c.lote}</span>
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626" }}>{c.condAyer.toFixed(2)} → {c.condHoy.toFixed(2)} (+{c.subida.toFixed(2)})</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {expandedCard === "descarte" && (
+        <Card style={{ border: "2px solid #FDE68A", animation: "fadeSlideIn .3s" }}>
+          <SectionTitle icon="⚠️" text={`Candidatas a Descarte — ${cullCandidates.length} cabras`} color="#E8950A" />
+          <div style={{ fontSize: 12, color: "#64748B", marginBottom: 12 }}>Criterio: &lt;1.5L/día, ≥3 lactaciones, &gt;60 DEL. No incluye lotes secándose.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {cullCandidates.slice(0, 20).map((c, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "#FFFBEB", borderRadius: 8, border: "1px solid #FDE68A" }}>
+                <div>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "'Space Mono', monospace" }}>{c.crotal}</span>
+                  <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: 6 }}>{c.lote} · D{c.del}</span>
+                  {c.vaciaCount >= 2 && <span style={{ fontSize: 9, color: "#DC2626", marginLeft: 4, fontWeight: 700 }}>DOBLE VACÍA</span>}
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#DC2626", fontFamily: "'Space Mono', monospace" }}>{c.litros.toFixed(2)}L</div>
+                  <div style={{ fontSize: 9, color: "#94A3B8" }}>Lact {c.lactacion}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {expandedCard === "vacias" && (
+        <Card style={{ border: "2px solid #FBCFE8", animation: "fadeSlideIn .3s" }}>
+          <SectionTitle icon="🔴" text={`Doble Vacías — ${dobleVacias.length} cabras`} color="#DB2777" />
+          <div style={{ fontSize: 12, color: "#64748B", marginBottom: 12 }}>Cabras que han salido vacías en 2 o más ecografías consecutivas. Alta prioridad de revisión reproductiva.</div>
+          {dobleVacias.map((d, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F1F5F9" }}>
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#1E293B" }}>{d.crotal}</span>
+                <span style={{ fontSize: 11, color: "#94A3B8", marginLeft: 8 }}>{d.lote} · Estado: {d.estado}</span>
+              </div>
+              <Badge text={`${d.count}x vacía`} color="#DB2777" />
+            </div>
+          ))}
+          {dobleVacias.length === 0 && <div style={{ textAlign: "center", color: "#94A3B8", padding: 20 }}>No hay cabras doble vacías registradas.</div>}
+        </Card>
+      )}
+
+      {expandedCard === "notas" && (
+        <Card style={{ border: "2px solid #BAE6FD", animation: "fadeSlideIn .3s" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <SectionTitle icon="📋" text="Anotaciones Veterinarias" color="#0891B2" />
+            <button onClick={() => setShowAddNote(!showAddNote)} style={{ padding: "7px 16px", borderRadius: 9, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF" }}>+ Nueva anotación</button>
+          </div>
+          {showAddNote && (
+            <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 12, padding: 16, marginBottom: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 10, marginBottom: 10 }}>
+                <input value={newNote.cabra_crotal} onChange={e => setNewNote({ ...newNote, cabra_crotal: e.target.value })} placeholder="Crotal (opcional)" style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
+                <select value={newNote.tipo} onChange={e => setNewNote({ ...newNote, tipo: e.target.value })} style={{ padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", background: "#FFF" }}>
+                  <option value="individual">Individual</option>
+                  <option value="rebaño">Rebaño general</option>
+                  <option value="lote">Lote</option>
+                  <option value="urgente">Urgente</option>
+                </select>
+              </div>
+              <textarea value={newNote.texto} onChange={e => setNewNote({ ...newNote, texto: e.target.value })} placeholder="Describe la observación del veterinario..." rows={3} style={{ width: "100%", padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box", resize: "vertical", fontFamily: "'Outfit', sans-serif" }} />
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button onClick={saveNote} style={{ padding: "8px 20px", borderRadius: 9, border: "none", background: "#0891B2", color: "#FFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Guardar anotación</button>
+                <button onClick={() => setShowAddNote(false)} style={{ padding: "8px 20px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#FFF", color: "#64748B", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
+              </div>
+            </div>
+          )}
+          {anotaciones.length > 0 ? anotaciones.slice(0, 20).map((a, i) => {
+            const tipoC = { individual: "#0891B2", "rebaño": "#059669", lote: "#7C3AED", urgente: "#DC2626" };
+            return (
+              <div key={i} style={{ padding: "12px 0", borderBottom: "1px solid #F1F5F9" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Badge text={a.tipo || "individual"} color={tipoC[a.tipo] || "#94A3B8"} />
+                    {a.cabra?.crotal && <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#1E293B" }}>{a.cabra.crotal}</span>}
+                  </div>
+                  <span style={{ fontSize: 11, color: "#94A3B8" }}>{a.fecha}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.5, paddingLeft: 4 }}>{a.texto}</div>
+              </div>
+            );
+          }) : <div style={{ textAlign: "center", color: "#94A3B8", padding: 20 }}>Aún no hay anotaciones. Añade la primera con el botón de arriba.</div>}
+        </Card>
+      )}
+
+      {expandedCard === "alertas" && (
+        <Card style={{ border: "2px solid #FECACA", animation: "fadeSlideIn .3s" }}>
+          <SectionTitle icon="🚨" text={`Alertas Sanitarias — ${alertasActivas.length} activas`} color="#DC2626" />
+          {alertasActivas.length > 0 ? alertasActivas.map((a, i) => (
+            <div key={i} style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: 14, marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#DC2626" }}>{a.titulo}</span>
+                  <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: 8 }}>{a.fecha}</span>
+                </div>
+                <button onClick={() => resolveAlert(a.id)} style={{ padding: "4px 12px", borderRadius: 7, border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#059669", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>✓ Resuelta</button>
+              </div>
+              <div style={{ fontSize: 12, color: "#7F1D1D", lineHeight: 1.5 }}>{a.descripcion}</div>
+              {a.cabras_afectadas && a.cabras_afectadas.length > 0 && (
+                <div style={{ fontSize: 10.5, color: "#94A3B8", marginTop: 6 }}>Cabras: {a.cabras_afectadas.join(", ")}</div>
+              )}
+            </div>
+          )) : <div style={{ textAlign: "center", color: "#94A3B8", padding: 20 }}>Sin alertas activas. Las alertas se generan automáticamente al detectar patrones anómalos.</div>}
+          {alertasPersistentes.filter(a => a.estado === "resuelta").length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#94A3B8", marginBottom: 8 }}>Historial de alertas resueltas</div>
+              {alertasPersistentes.filter(a => a.estado === "resuelta").slice(0, 10).map((a, i) => (
+                <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid #F1F5F9", opacity: 0.6 }}>
+                  <span style={{ fontSize: 11, color: "#64748B" }}>✓ {a.fecha}: {a.titulo}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Chat sanitario */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20 }}>
+        <ChatBox messages={sanMsgs} input={sanMsg} setInput={setSanMsg} onSend={sendSan}
+          examples={["¿Por qué hay tantas cabras con conductividad alta?", "Analiza patrones de mastitis", "¿Qué cabras debería descartar?", "Revisa las anotaciones del veterinario"]}
+          onExample={setSanMsg}
+          placeholder="Pregunta sobre sanidad..."
+          height={350}
+        />
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Card style={{ background: "linear-gradient(135deg, #FEF9EE, #FFF7ED)", border: "1px solid #FDE68A" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#E8950A", marginBottom: 8 }}>💡 Resumen rápido</div>
+            {[
+              `${highCond.length} cabras con conductividad >6.0`,
+              condPatterns.length > 0 ? `⚠️ ${condPatterns.length} patrón${condPatterns.length > 1 ? "es" : ""} detectado${condPatterns.length > 1 ? "s" : ""}` : "✅ Sin patrones anómalos",
+              `${cullCandidates.length} candidatas a descarte`,
+              `${dobleVacias.length} doble vacías`,
+              condRising.length > 0 ? `📈 ${condRising.length} cabras con conductividad subiendo` : null,
+              `${anotaciones.length} anotaciones veterinarias`,
+            ].filter(Boolean).map((t, i) => (
+              <div key={i} style={{ fontSize: 11.5, color: "#78590A", padding: "3px 0", display: "flex", gap: 6 }}>
+                <span style={{ color: "#E8950A" }}>→</span>{t}
+              </div>
+            ))}
+          </Card>
+          <Card style={{ background: "#F0F9FF", border: "1px solid #BAE6FD" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#0891B2", marginBottom: 8 }}>🐐 Sobre esta página</div>
+            <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.6 }}>
+              Esta página analiza automáticamente los datos de producción, ecografías y anotaciones para detectar problemas sanitarios. Las alertas se guardan y persisten entre sesiones para que no se pierda nada aunque no revises la app a diario.
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
 // MAIN APP
 // ==========================================
 const NAV = [
   { id: "dashboard", icon: "📊", label: "Dashboard" },
   { id: "produccion", icon: "🥛", label: "Producción" },
+  { id: "sanidad", icon: "🏥", label: "Sanidad" },
   { id: "rentabilidad", icon: "💰", label: "Rentabilidad" },
   { id: "importador", icon: "📁", label: "Importador" },
   { id: "consultas", icon: "💬", label: "Consultas" },
@@ -2423,11 +2937,12 @@ export default function App() {
       <div style={{ padding: "22px 28px", maxWidth: 1360, margin: "0 auto" }}>
         <div style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 23, fontWeight: 800, color: "#1E293B", letterSpacing: "-.02em" }}>
-            {{ dashboard: "Dashboard", produccion: "Producción & Análisis", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", config: "Configuración" }[page]}
+            {{ dashboard: "Dashboard", produccion: "Producción & Análisis", sanidad: "Centro de Control Sanitario", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", config: "Configuración" }[page]}
           </div>
           <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 3 }}>
             {{ dashboard: `Datos en vivo de Supabase · ${data.cabras.length} cabras · ${data.parideras.length} parideras`,
               produccion: `Análisis productivo · ${data.produccion?.length || 0} registros · Alertas sanitarias`,
+              sanidad: "Alertas, patrones, conductividad, anotaciones veterinarias, candidatas a descarte",
               rentabilidad: "Análisis financiero · Previsión de producción · Control de ingresos y gastos",
               importador: "Sube CSV del FLM y se importa automáticamente a Supabase",
               consultas: "Pregunta lo que quieras — respuestas con datos reales",
@@ -2436,6 +2951,7 @@ export default function App() {
         </div>
         {page === "dashboard" && <DashboardPage data={data} />}
         {page === "produccion" && <ProduccionPage data={data} />}
+        {page === "sanidad" && <SanidadPage data={data} refresh={refresh} />}
         {page === "rentabilidad" && <RentabilidadPage data={data} />}
         {page === "importador" && <ImportadorPage data={data} refresh={refresh} />}
         {page === "consultas" && <ConsultasPage data={data} />}

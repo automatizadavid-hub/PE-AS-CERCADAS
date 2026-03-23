@@ -134,7 +134,7 @@ function useSupabaseData() {
         supabase.from("muerte").select("*, cabra:cabra_id(crotal)"),
         supabase.from("protocolo_veterinario").select("*"),
         supabase.from("evento_calendario").select("*").order("fecha", { ascending: true }),
-        supabase.from("produccion_leche").select("*").order("fecha", { ascending: false }).limit(600),
+        supabase.from("produccion_leche").select("*").order("fecha", { ascending: false }).limit(15000),
         supabase.from("resumen_diario").select("*").order("fecha", { ascending: false }).limit(30),
       ]);
 
@@ -868,6 +868,37 @@ function ImportadorPage({ data, refresh }) {
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
+  // Helper: parse number handling both comma and dot decimals
+  const parseNum = (val) => {
+    if (val === null || val === undefined || val === "") return 0;
+    const clean = String(val).trim().replace(",", ".");
+    const num = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+  };
+
+  // Helper: normalize text for accent-agnostic comparison
+  const normalizeText = (text) => {
+    return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  };
+
+  // Helper: read file with encoding detection (UTF-8 → Windows-1252 fallback)
+  const readFileText = async (file) => {
+    // Try UTF-8 first
+    let text = await file.text();
+    // Remove BOM if present
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    // Check for encoding corruption markers
+    const hasCorruption = /Ã[€-¿]|â€|ï»¿|\uFFFD/.test(text.substring(0, 500));
+    if (hasCorruption) {
+      // Re-read as Windows-1252
+      const buffer = await file.arrayBuffer();
+      const decoder = new TextDecoder("windows-1252");
+      text = decoder.decode(buffer);
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    }
+    return text;
+  };
+
   const parseCSV = (text) => {
     const firstLine = text.split("\n")[0] || "";
     let delimiter = ";";
@@ -887,24 +918,84 @@ function ImportadorPage({ data, refresh }) {
     });
   };
 
+  // Accent-agnostic detection of FLM production CSV
   const isProductionCSV = (header) => {
-    const h = header.join(" ").toLowerCase();
-    return h.includes("producción diaria") || h.includes("litros totales") || h.includes("del") && h.includes("lactación");
+    const h = normalizeText(header.join(" "));
+    return (h.includes("produccion diaria") || h.includes("litros totales")) || (h.includes("del") && h.includes("lactacion"));
+  };
+
+  // Build column map from header: maps normalized names → column index
+  const buildColumnMap = (header) => {
+    const map = {};
+    const aliases = {
+      "identificador del animal": "crotal",
+      "identificador": "crotal",
+      "animal": "crotal",
+      "grupo": "grupo",
+      "del": "del",
+      "produccion diaria": "prod_diaria",
+      "ultima produccion": "ultima_prod",
+      "promedio 10 dias": "prom_10d",
+      "promedio 10 d": "prom_10d",
+      "lactacion": "lactacion",
+      "litros totales": "litros_totales",
+      "promedio total": "promedio_total",
+      "media conductividad": "conductividad",
+      "conductividad": "conductividad",
+      "tiempo de ordeno": "tiempo_ordeno",
+      "tiempo ordeno": "tiempo_ordeno",
+      "flujo": "flujo",
+    };
+    header.forEach((col, idx) => {
+      const norm = normalizeText(col);
+      // Try exact match first
+      if (aliases[norm]) { map[aliases[norm]] = idx; return; }
+      // Try partial match
+      for (const [pattern, key] of Object.entries(aliases)) {
+        if (norm.includes(pattern) && !map[key]) { map[key] = idx; }
+      }
+    });
+    return map;
   };
 
   const importProduction = async (rows) => {
     setImporting(true);
     setImportResult(null);
     const header = rows[0];
-    const dataRows = rows.slice(1).filter(r => r[0] && r[0][0] >= '0' && r[0][0] <= '9' && !r[0].startsWith('Contar') && !r[0].startsWith('Suma'));
-    const today = new Date().toISOString().split('T')[0];
+    const colMap = buildColumnMap(header);
+
+    // Validate required columns exist
+    const required = ["crotal", "prod_diaria"];
+    const missing = required.filter(k => colMap[k] === undefined);
+    if (missing.length > 0) {
+      setMs(p => [...p, { role: "assistant", text: `🔴 Error: No se encontraron columnas obligatorias: ${missing.join(", ")}. Columnas detectadas: ${JSON.stringify(colMap, null, 2)}` }]);
+      setImporting(false);
+      return;
+    }
+
+    // Show diagnostic in chat
+    const diagLines = Object.entries(colMap).map(([key, idx]) => `  ${key} → columna ${idx} ("${header[idx]}")`).join("\n");
+    setMs(p => [...p, { role: "assistant", text: `🔍 Diagnóstico de columnas:\n${diagLines}\n\n⏳ Importando...` }]);
+
+    const dataRows = rows.slice(1).filter(r => {
+      const first = (r[colMap.crotal] || r[0] || "").trim();
+      return first && first[0] >= '0' && first[0] <= '9' && !first.startsWith('Contar') && !first.startsWith('Suma');
+    });
+
+    // Extract date from filename (e.g. "INFORME APP DIARIO_2026-03-23 12_51_11.csv")
+    // Fallback to today if not found
+    const dateMatch = fileName ? fileName.match(/(\d{4}-\d{2}-\d{2})/) : null;
+    const reportDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+    const dateSource = dateMatch ? "del archivo" : "de hoy (no se encontró fecha en el nombre)";
     
-    let imported = 0, updated = 0, errors = 0, newCabras = 0, loteChanges = 0;
+    // Notify user which date is being used
+    setMs(p => [...p, { role: "assistant", text: `📅 Fecha del informe: **${reportDate}** (extraída ${dateSource})` }]);
+    
+    let imported = 0, errors = 0, newCabras = 0, loteChanges = 0;
     let totalLitros = 0;
     const alertas = [];
     const errorList = [];
 
-    // Map FLM group names to our lote names
     // Extract lote number from first digits of grupo name
     const mapGrupo = (g) => {
       if (!g) return null;
@@ -913,25 +1004,28 @@ function ImportadorPage({ data, refresh }) {
       return `Lote ${match[1]}`;
     };
 
-    for (const row of dataRows) {
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
       try {
-        const crotal = row[0]?.trim();
+        // Read values using column map (fallback to positional for safety)
+        const crotal = (row[colMap.crotal ?? 0] || "").trim();
         if (!crotal) continue;
-        const grupo = row[1] || "";
-        const del_dias = parseFloat(row[2]) || 0;
-        const prod_diaria = parseFloat(row[3]) || 0;
-        const ultima_prod = parseFloat(row[4]) || 0;
-        const prom_10d = parseFloat(row[5]) || 0;
-        const lactacion = parseInt(row[6]) || 0;
-        const litros_totales = parseFloat(row[7]) || 0;
-        const promedio_total = parseFloat(row[8]) || 0;
-        const conductividad = parseFloat(row[9]) || 0;
-        const tiempo_ordeno = parseFloat(row[10]) || 0;
-        const flujo = row[11] ? parseFloat(row[11]) : null;
+        const grupo = row[colMap.grupo ?? 1] || "";
+        const del_dias = parseNum(row[colMap.del ?? 2]);
+        const prod_diaria = parseNum(row[colMap.prod_diaria ?? 3]);
+        const ultima_prod = parseNum(row[colMap.ultima_prod ?? 4]);
+        const prom_10d = parseNum(row[colMap.prom_10d ?? 5]);
+        const lactacion = parseInt(row[colMap.lactacion ?? 6]) || 0;
+        const litros_totales = parseNum(row[colMap.litros_totales ?? 7]);
+        const promedio_total = parseNum(row[colMap.promedio_total ?? 8]);
+        const conductividad = parseNum(row[colMap.conductividad ?? 9]);
+        const tiempo_ordeno = parseNum(row[colMap.tiempo_ordeno ?? 10]);
+        const flujo_raw = row[colMap.flujo ?? 11];
+        const flujo = flujo_raw ? parseNum(flujo_raw) : null;
 
         totalLitros += prod_diaria;
 
-        // Find cabra
+        // Find cabra in existing data
         let cabra = data.cabras.find(c => c.crotal === crotal);
         
         // If not found, create it
@@ -948,9 +1042,9 @@ function ImportadorPage({ data, refresh }) {
             crotal, estado: "lactacion", sexo: "hembra", raza: "Murciano-Granadina",
             num_lactaciones: lactacion, dias_en_leche: del_dias,
             lote_id: lote?.id || null,
-            notas: `Añadida desde informe FLM ${today}`
+            notas: `Añadida desde informe FLM ${reportDate}`
           }]).select().single();
-          if (errC) { errors++; errorList.push(`${crotal}: error creando cabra`); continue; }
+          if (errC) { errors++; errorList.push(`${crotal}: error creando cabra — ${errC.message}`); continue; }
           cabra = newC;
           newCabras++;
         }
@@ -959,7 +1053,6 @@ function ImportadorPage({ data, refresh }) {
         const loteName = mapGrupo(grupo);
         if (loteName) {
           let newLote = data.lotes.find(l => l.nombre === loteName);
-          // Create lote if it doesn't exist
           if (!newLote) {
             const { data: created } = await supabase.from("lote").insert([{
               nombre: loteName, tipo: "alta_produccion", descripcion: grupo
@@ -970,16 +1063,18 @@ function ImportadorPage({ data, refresh }) {
             }
           }
           if (newLote && cabra.lote_id !== newLote.id) {
-            await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
-            loteChanges++;
+            const { error: errU } = await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
+            if (errU) { errorList.push(`${crotal}: error actualizando lote — ${errU.message}`); }
+            else { loteChanges++; }
           } else {
-            await supabase.from("cabra").update({ dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
+            const { error: errU } = await supabase.from("cabra").update({ dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
+            if (errU) { errorList.push(`${crotal}: error actualizando cabra — ${errU.message}`); }
           }
         }
 
         // Insert production record (upsert to avoid duplicates)
         const { error: errP } = await supabase.from("produccion_leche").upsert([{
-          cabra_id: cabra.id, fecha: today, litros: prod_diaria,
+          cabra_id: cabra.id, fecha: reportDate, litros: prod_diaria,
           dia_lactacion: del_dias, media_10d: prom_10d,
           litros_totales_lactacion: litros_totales, media_total: promedio_total,
           lactacion_num: lactacion, lote_nombre: grupo,
@@ -993,32 +1088,32 @@ function ImportadorPage({ data, refresh }) {
         // Check alerts
         if (conductividad > 6.0) alertas.push({ tipo: "alta", msg: `🔴 ${crotal}: conductividad ${conductividad.toFixed(2)} mS/cm — posible mastitis` });
         if (prom_10d > 0 && prod_diaria < prom_10d * 0.7) alertas.push({ tipo: "media", msg: `⚠️ ${crotal}: producción ${prod_diaria.toFixed(1)}L (prom10d: ${prom_10d.toFixed(1)}L) — caída del ${((1 - prod_diaria / prom_10d) * 100).toFixed(0)}%` });
-        if (flujo && flujo < 0.1) alertas.push({ tipo: "media", msg: `⚠️ ${crotal}: flujo ${flujo.toFixed(3)} L/min — muy bajo` });
+        if (flujo !== null && flujo < 0.1) alertas.push({ tipo: "media", msg: `⚠️ ${crotal}: flujo ${flujo.toFixed(3)} L/min — muy bajo` });
         if (tiempo_ordeno > 14) alertas.push({ tipo: "baja", msg: `ℹ️ ${crotal}: tiempo ordeño ${tiempo_ordeno.toFixed(1)} min — excesivo` });
 
       } catch (err) {
         errors++;
-        errorList.push(`${row[0]}: ${err.message}`);
+        errorList.push(`${row[colMap.crotal ?? 0] || "???"}: ${err.message}`);
       }
     }
 
     // Create daily summary
     await supabase.from("resumen_diario").upsert([{
-      fecha: today, total_cabras: dataRows.length,
+      fecha: reportDate, total_cabras: dataRows.length,
       litros_totales: Math.round(totalLitros * 100) / 100,
       media_litros: Math.round(totalLitros / dataRows.length * 1000) / 1000,
       cabras_alta_conductividad: alertas.filter(a => a.msg.includes("conductividad")).length,
       archivo_origen: fileName,
     }], { onConflict: "fecha" });
 
-    setImportResult({ imported, updated, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length });
+    setImportResult({ imported, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length });
     setImporting(false);
     refresh();
     
     // Add result to chat
-    let chatMsg = `✅ Importación completada:\n• ${imported} registros de producción importados\n• ${totalLitros.toFixed(1)} litros totales hoy\n• ${loteChanges} cambios de lote detectados`;
+    let chatMsg = `✅ Importación completada:\n• ${imported}/${dataRows.length} registros de producción importados\n• ${totalLitros.toFixed(1)} litros totales hoy\n• ${loteChanges} cambios de lote detectados`;
     if (newCabras > 0) chatMsg += `\n• ${newCabras} cabras nuevas creadas`;
-    if (errors > 0) chatMsg += `\n• ${errors} errores`;
+    if (errors > 0) chatMsg += `\n• 🔴 ${errors} errores:\n${errorList.slice(0, 10).map(e => `  - ${e}`).join("\n")}`;
     if (alertas.length > 0) chatMsg += `\n\n🚨 ALERTAS (${alertas.length}):\n${alertas.slice(0, 10).map(a => a.msg).join("\n")}`;
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
@@ -1027,7 +1122,7 @@ function ImportadorPage({ data, refresh }) {
     setFileName(file.name);
     setImportResult(null);
     try {
-      const text = await file.text();
+      const text = await readFileText(file);
       const rows = parseCSV(text);
       const cleanRows = rows.filter(r => r.length > 1 && r[0]);
       setRawRows(cleanRows);
@@ -1037,7 +1132,9 @@ function ImportadorPage({ data, refresh }) {
       setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${cleanRows.length} filas)` }]);
       
       if (isProductionCSV(cleanRows[0] || [])) {
-        setMs(p => [...p, { role: "assistant", text: `He detectado un informe de producción del FLM con ${cleanRows.length - 1} cabras. Columnas: ${cleanRows[0].join(", ")}.\n\nPulsa el botón "Importar a Supabase" para procesarlo. Se actualizarán los datos de producción, los cambios de lote, y se generarán alertas de conductividad.` }]);
+        const colMap = buildColumnMap(cleanRows[0]);
+        const colInfo = Object.entries(colMap).map(([k, v]) => `${k}→col${v}`).join(", ");
+        setMs(p => [...p, { role: "assistant", text: `✅ Informe FLM detectado: ${cleanRows.length - 1} cabras, ${Object.keys(colMap).length} columnas mapeadas.\n\n📊 Columnas: ${colInfo}\n\nPulsa "Importar a Supabase" para procesarlo.` }]);
       } else {
         setLd(true);
         const response = await askClaude(
@@ -1048,7 +1145,7 @@ function ImportadorPage({ data, refresh }) {
         setLd(false);
       }
     } catch (err) {
-      setMs(p => [...p, { role: "assistant", text: `Error: ${err.message}` }]);
+      setMs(p => [...p, { role: "assistant", text: `Error leyendo archivo: ${err.message}` }]);
     }
   };
 
@@ -1709,12 +1806,121 @@ function ProduccionPage({ data }) {
   const [prodMsg, setProdMsg] = useState("");
   const [prodMsgs, setProdMsgs] = useState([{ role: "assistant", text: "Soy el analista de producción de Peñas Cercadas. Puedo analizar rendimiento, detectar tendencias, comparar lotes, identificar las mejores y peores cabras, y recomendar decisiones. Pregúntame lo que quieras." }]);
   const [prodLd, setProdLd] = useState(false);
+  const [selectedCabra, setSelectedCabra] = useState(null);
   const dataCtx = buildDataContext(data);
 
-  // Get latest production data
-  const prod = data.produccion || [];
-  const latestDate = prod.length > 0 ? prod[0].fecha : null;
-  const todayProd = latestDate ? prod.filter(p => p.fecha === latestDate) : [];
+  // =============================================
+  // HISTORICAL ANALYSIS — Multi-day data
+  // =============================================
+  const allProd = data.produccion || [];
+  
+  // Get unique dates sorted descending
+  const allDates = [...new Set(allProd.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
+  const latestDate = allDates[0] || null;
+  const previousDate = allDates[1] || null;
+  const hasTwodays = allDates.length >= 2;
+
+  // Today's production
+  const todayProd = latestDate ? allProd.filter(p => p.fecha === latestDate) : [];
+  const prevProd = previousDate ? allProd.filter(p => p.fecha === previousDate) : [];
+
+  // Daily summary from all production records (more accurate than resumen_diario)
+  const dailySummary = allDates.map(fecha => {
+    const dayProd = allProd.filter(p => p.fecha === fecha);
+    const totalL = dayProd.reduce((s, p) => s + (p.litros || 0), 0);
+    const cabras = dayProd.length;
+    return {
+      fecha,
+      fechaShort: new Date(fecha + "T12:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" }),
+      litros: Math.round(totalL * 10) / 10,
+      cabras,
+      media: cabras > 0 ? Math.round(totalL / cabras * 100) / 100 : 0,
+    };
+  }).reverse(); // chronological for charts
+
+  // =============================================
+  // PER-CABRA COMPARISON: today vs yesterday
+  // =============================================
+  const prevByCabra = {};
+  prevProd.forEach(p => { prevByCabra[p.cabra_id] = p; });
+
+  const cabraComparison = todayProd.map(p => {
+    const cabra = data.cabras.find(c => c.id === p.cabra_id);
+    if (!cabra) return null;
+    const prev = prevByCabra[p.cabra_id];
+    const litrosHoy = p.litros || 0;
+    const litrosAyer = prev ? (prev.litros || 0) : null;
+    const cambio = litrosAyer !== null && litrosAyer > 0 ? ((litrosHoy - litrosAyer) / litrosAyer) * 100 : null;
+    return {
+      cabra_id: p.cabra_id,
+      crotal: cabra.crotal,
+      lote: cabra.lote?.nombre || "-",
+      litrosHoy,
+      litrosAyer,
+      cambio, // percentage change
+      del: p.dia_lactacion || 0,
+      lactacion: p.lactacion_num || 0,
+      conductividad: p.conductividad || 0,
+      promedio_10d: p.promedio_10d || p.media_10d || 0,
+    };
+  }).filter(Boolean);
+
+  // Biggest drops (only cabras that dropped >25%)
+  const bigDrops = cabraComparison
+    .filter(c => c.cambio !== null && c.cambio < -25 && c.litrosAyer > 0.5)
+    .sort((a, b) => a.cambio - b.cambio);
+
+  // Biggest rises
+  const bigRises = cabraComparison
+    .filter(c => c.cambio !== null && c.cambio > 25 && c.litrosHoy > 0.5)
+    .sort((a, b) => b.cambio - a.cambio);
+
+  // =============================================
+  // LOTE COMPARISON between days
+  // =============================================
+  const buildLoteDay = (dayProd) => {
+    const loteMap = {};
+    dayProd.forEach(p => {
+      const cabra = data.cabras.find(c => c.id === p.cabra_id);
+      if (!cabra) return;
+      const loteName = cabra.lote?.nombre || "Sin lote";
+      if (!loteMap[loteName]) loteMap[loteName] = { nombre: loteName, litros: 0, cabras: 0 };
+      loteMap[loteName].litros += (p.litros || 0);
+      loteMap[loteName].cabras++;
+    });
+    return Object.values(loteMap).map(l => ({ ...l, media: l.cabras > 0 ? l.litros / l.cabras : 0 }));
+  };
+
+  const lotesToday = buildLoteDay(todayProd);
+  const lotesPrev = buildLoteDay(prevProd);
+  
+  // Merge lote comparison
+  const loteComparison = lotesToday.map(lt => {
+    const lp = lotesPrev.find(l => l.nombre === lt.nombre);
+    return {
+      nombre: lt.nombre,
+      mediaHoy: Math.round(lt.media * 100) / 100,
+      mediaAyer: lp ? Math.round(lp.media * 100) / 100 : null,
+      cambio: lp && lp.media > 0 ? Math.round(((lt.media - lp.media) / lp.media) * 10000) / 100 : null,
+      cabrasHoy: lt.cabras,
+      litrosHoy: Math.round(lt.litros),
+    };
+  }).sort((a, b) => b.mediaHoy - a.mediaHoy);
+
+  // =============================================
+  // INDIVIDUAL CABRA HISTORY (when selected)
+  // =============================================
+  const cabraHistory = selectedCabra
+    ? allDates.map(fecha => {
+        const rec = allProd.find(p => p.cabra_id === selectedCabra.cabra_id && p.fecha === fecha);
+        return rec ? {
+          fecha,
+          fechaShort: new Date(fecha + "T12:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" }),
+          litros: rec.litros || 0,
+          conductividad: rec.conductividad || 0,
+        } : null;
+      }).filter(Boolean).reverse()
+    : [];
 
   // Build production stats by cabra
   const cabraStats = {};
@@ -1818,6 +2024,180 @@ function ProduccionPage({ data }) {
         <KPI icon="🔬" label="Conductividad" value={`${avgConductividad.toFixed(2)}`} sub={`${stats.filter(s => s.conductividad > 6.0).length} alertas`} accent="#DB2777" />
         <KPI icon="⚡" label="Flujo medio" value={`${(stats.reduce((s, c) => s + (c.flujo || 0), 0) / stats.length).toFixed(2)}`} sub="L/min" accent="#0891B2" />
       </div>
+
+      {/* ================================================ */}
+      {/* ANÁLISIS HISTÓRICO — Sección principal nueva      */}
+      {/* ================================================ */}
+      {allDates.length >= 1 && (
+        <Card style={{ border: "2px solid #E8950A20", background: "linear-gradient(135deg, #FFFCF5, #FFF)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <SectionTitle icon="📈" text={`Análisis Histórico · ${allDates.length} día${allDates.length > 1 ? "s" : ""} importado${allDates.length > 1 ? "s" : ""}`} />
+            {allDates.length < 3 && (
+              <div style={{ fontSize: 11, color: "#E8950A", background: "#FEF9EE", padding: "4px 10px", borderRadius: 8, border: "1px solid #FDE68A" }}>
+                💡 Importa más días para ver tendencias más claras
+              </div>
+            )}
+          </div>
+
+          {/* Evolución diaria — gráfica */}
+          {dailySummary.length >= 2 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#64748B", marginBottom: 8 }}>Evolución diaria</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <ComposedChart data={dailySummary}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="fechaShort" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+                  <Tooltip content={<CustomTooltip formatter={(v, name) => name === "Media L/cabra" ? `${v.toFixed(2)} L` : `${v} L`} />} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Area yAxisId="left" type="monotone" dataKey="litros" name="Litros totales" fill="#059669" fillOpacity={0.1} stroke="#059669" strokeWidth={2} />
+                  <Line yAxisId="right" type="monotone" dataKey="media" name="Media L/cabra" stroke="#E8950A" strokeWidth={2} dot={{ r: 4, fill: "#E8950A" }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Grid: Caídas + Subidas + Lotes */}
+          <div style={{ display: "grid", gridTemplateColumns: hasTwodays ? "1fr 1fr 1fr" : "1fr", gap: 16 }}>
+            
+            {/* Mayores caídas */}
+            {hasTwodays && (
+              <div style={{ background: "#FEF2F2", borderRadius: 12, padding: 14, border: "1px solid #FECACA" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  🔴 Mayores caídas ({bigDrops.length})
+                </div>
+                {bigDrops.length === 0 && <div style={{ fontSize: 11.5, color: "#94A3B8" }}>Ninguna cabra bajó más del 25%</div>}
+                {bigDrops.slice(0, 10).map((c, i) => (
+                  <div key={i} onClick={() => setSelectedCabra(c)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #FECACA40", cursor: "pointer" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#FEE2E240"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#334155", fontFamily: "'Space Mono', monospace" }}>{c.crotal}</span>
+                      <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: 4 }}>{c.lote}</span>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", fontFamily: "'Space Mono', monospace" }}>{c.cambio.toFixed(0)}%</span>
+                      <div style={{ fontSize: 9.5, color: "#94A3B8" }}>{c.litrosAyer?.toFixed(1)}→{c.litrosHoy.toFixed(1)}L</div>
+                    </div>
+                  </div>
+                ))}
+                {bigDrops.length > 10 && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 4 }}>...y {bigDrops.length - 10} más</div>}
+              </div>
+            )}
+
+            {/* Mayores subidas */}
+            {hasTwodays && (
+              <div style={{ background: "#F0FDF4", borderRadius: 12, padding: 14, border: "1px solid #BBF7D0" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  ✅ Mayores subidas ({bigRises.length})
+                </div>
+                {bigRises.length === 0 && <div style={{ fontSize: 11.5, color: "#94A3B8" }}>Ninguna cabra subió más del 25%</div>}
+                {bigRises.slice(0, 10).map((c, i) => (
+                  <div key={i} onClick={() => setSelectedCabra(c)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #BBF7D040", cursor: "pointer" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#DCFCE740"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#334155", fontFamily: "'Space Mono', monospace" }}>{c.crotal}</span>
+                      <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: 4 }}>{c.lote}</span>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#059669", fontFamily: "'Space Mono', monospace" }}>+{c.cambio.toFixed(0)}%</span>
+                      <div style={{ fontSize: 9.5, color: "#94A3B8" }}>{c.litrosAyer?.toFixed(1)}→{c.litrosHoy.toFixed(1)}L</div>
+                    </div>
+                  </div>
+                ))}
+                {bigRises.length > 10 && <div style={{ fontSize: 10, color: "#059669", marginTop: 4 }}>...y {bigRises.length - 10} más</div>}
+              </div>
+            )}
+
+            {/* Comparativa lotes */}
+            {hasTwodays && (
+              <div style={{ background: "#F8FAFC", borderRadius: 12, padding: 14, border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                  📊 Comparativa Lotes (hoy vs ayer)
+                </div>
+                {loteComparison.map((l, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F1F5F9" }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{l.nombre}</div>
+                      <div style={{ fontSize: 10, color: "#94A3B8" }}>{l.cabrasHoy} cabras · {l.litrosHoy}L</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", fontFamily: "'Space Mono', monospace" }}>{l.mediaHoy} L/cab</span>
+                      {l.cambio !== null && (
+                        <div style={{ fontSize: 10, fontWeight: 600, color: l.cambio >= 0 ? "#059669" : "#DC2626" }}>
+                          {l.cambio >= 0 ? "▲" : "▼"} {Math.abs(l.cambio).toFixed(1)}% vs ayer ({l.mediaAyer} L)
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Si solo hay 1 día, mostrar resumen */}
+            {!hasTwodays && (
+              <div style={{ background: "#F8FAFC", borderRadius: 12, padding: 14, border: "1px solid #E2E8F0", textAlign: "center" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#64748B", marginBottom: 6 }}>📊 Solo 1 día importado ({latestDate})</div>
+                <div style={{ fontSize: 12, color: "#94A3B8" }}>
+                  Importa el CSV de mañana y verás aquí: caídas de producción, subidas, y comparativa entre lotes día a día.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Mini ficha de cabra seleccionada */}
+          {selectedCabra && (
+            <div style={{ marginTop: 16, background: "#FFF", border: "1px solid #E2E8F0", borderRadius: 12, padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: "#1E293B", fontFamily: "'Space Mono', monospace" }}>{selectedCabra.crotal}</span>
+                  <span style={{ fontSize: 12, color: "#94A3B8", marginLeft: 8 }}>{selectedCabra.lote} · L{selectedCabra.lactacion} · DEL {selectedCabra.del}</span>
+                </div>
+                <button onClick={() => setSelectedCabra(null)} style={{ background: "#F1F5F9", border: "none", borderRadius: 8, padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#64748B" }}>✕ Cerrar</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 12 }}>
+                <div style={{ textAlign: "center", padding: 8, background: "#F8FAFC", borderRadius: 8 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#059669" }}>{selectedCabra.litrosHoy.toFixed(2)}L</div>
+                  <div style={{ fontSize: 10, color: "#94A3B8" }}>Hoy</div>
+                </div>
+                <div style={{ textAlign: "center", padding: 8, background: "#F8FAFC", borderRadius: 8 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#64748B" }}>{selectedCabra.litrosAyer !== null ? `${selectedCabra.litrosAyer.toFixed(2)}L` : "-"}</div>
+                  <div style={{ fontSize: 10, color: "#94A3B8" }}>Ayer</div>
+                </div>
+                <div style={{ textAlign: "center", padding: 8, background: "#F8FAFC", borderRadius: 8 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: selectedCabra.cambio !== null ? (selectedCabra.cambio >= 0 ? "#059669" : "#DC2626") : "#94A3B8" }}>
+                    {selectedCabra.cambio !== null ? `${selectedCabra.cambio >= 0 ? "+" : ""}${selectedCabra.cambio.toFixed(1)}%` : "-"}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#94A3B8" }}>Cambio</div>
+                </div>
+                <div style={{ textAlign: "center", padding: 8, background: "#F8FAFC", borderRadius: 8 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: selectedCabra.conductividad > 6.0 ? "#DC2626" : "#64748B" }}>{selectedCabra.conductividad.toFixed(2)}</div>
+                  <div style={{ fontSize: 10, color: "#94A3B8" }}>Conduct.</div>
+                </div>
+              </div>
+              {/* Mini chart of cabra history */}
+              {cabraHistory.length >= 2 && (
+                <ResponsiveContainer width="100%" height={120}>
+                  <LineChart data={cabraHistory}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                    <XAxis dataKey="fechaShort" tick={{ fontSize: 10, fill: "#94A3B8" }} />
+                    <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} />
+                    <Tooltip content={<CustomTooltip formatter={v => `${v.toFixed(2)} L`} />} />
+                    <Line type="monotone" dataKey="litros" stroke="#E8950A" strokeWidth={2} dot={{ r: 4, fill: "#E8950A" }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+              {cabraHistory.length < 2 && (
+                <div style={{ fontSize: 11, color: "#94A3B8", textAlign: "center", padding: 10 }}>
+                  Se necesitan al menos 2 días para ver la curva de esta cabra.
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>

@@ -98,6 +98,98 @@ function buildDataContext(data) {
     });
   }
   
+  // =============================================
+  // DETECTOR DE ANOMALÍAS — Errores humanos y datos sospechosos
+  // Se envía SIEMPRE para que la IA esté al tanto
+  // =============================================
+  const anomalias = [];
+  const prod = data.produccion || [];
+  const latestDate2 = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a))[0];
+  const todayProd2 = latestDate2 ? prod.filter(p => p.fecha === latestDate2) : [];
+  const prodById = {};
+  todayProd2.forEach(p => { prodById[p.cabra_id] = p; });
+
+  // Calcular DEL medio por lote
+  const loteDEL = {};
+  data.cabras.forEach(c => {
+    const lote = data.lotes.find(l => l.id === c.lote_id);
+    if (!lote) return;
+    const p = prodById[c.id];
+    const del = p?.dia_lactacion || c.dias_en_leche || 0;
+    if (!loteDEL[lote.nombre]) loteDEL[lote.nombre] = { dels: [], lote };
+    loteDEL[lote.nombre].dels.push({ crotal: c.crotal, del, litros: p?.litros || 0, cabra_id: c.id, conductividad: p?.conductividad || 0 });
+  });
+
+  Object.entries(loteDEL).forEach(([loteName, info]) => {
+    if (info.dels.length < 3) return;
+    const avgDEL = info.dels.reduce((s, d) => s + d.del, 0) / info.dels.length;
+    const estado = info.lote.estado || 'produccion';
+
+    info.dels.forEach(d => {
+      // 1. DEL muy fuera de rango del lote (>100 días de diferencia con la media)
+      if (Math.abs(d.del - avgDEL) > 100 && d.del > 0) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName}: DEL=${d.del} (media lote=${Math.round(avgDEL)}). Diferencia de ${Math.abs(Math.round(d.del - avgDEL))} días — ¿debería estar en otro lote?`);
+      }
+
+      // 2. Cabra en lote secándose pero con producción alta
+      if (estado === 'secandose' && d.litros > 3.0) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (SECÁNDOSE) pero produce ${d.litros.toFixed(1)}L — ¿seguro que debe secarse?`);
+      }
+
+      // 3. Cabra en lote de recién paridas con muchos DEL
+      if ((loteName.includes("Lote 5") || loteName.includes("Lote 13")) && d.del > 150) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (recién paridas) pero DEL=${d.del} — debería estar en Lote 1 o 4 para cubrición`);
+      }
+
+      // 4. Cabra en Lote 2 (pariendo) con muchos DEL
+      if (loteName.includes("Lote 2") && d.del > 100) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (pariendo) pero DEL=${d.del} — ¿ya parió y no se movió de lote?`);
+      }
+    });
+  });
+
+  // 5. Vacías del Lote 6 que no se han movido
+  const lote6 = data.lotes.find(l => l.nombre && l.nombre.includes("Lote 6"));
+  if (lote6) {
+    data.cabras.filter(c => c.lote_id === lote6.id).forEach(c => {
+      const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+      if (ecos.length > 0) {
+        const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+        if (lastEco.resultado === 'vacia') {
+          anomalias.push(`⚠️ ${c.crotal} sigue en Lote 6 pero última eco fue VACÍA (${lastEco.fecha}) — debería ir a cubrición. Error humano probable.`);
+        }
+      }
+    });
+  }
+
+  // 6. Cabras con ecografía gestante pero en lote de producción sin secado programado
+  data.cabras.forEach(c => {
+    const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+    if (ecos.length === 0) return;
+    const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    const lote = data.lotes.find(l => l.id === c.lote_id);
+    if (lastEco.resultado === 'gestante' && lote && (lote.nombre.includes("Lote 1") || lote.nombre.includes("Lote 4"))) {
+      const p = prodById[c.id];
+      const del = p?.dia_lactacion || c.dias_en_leche || 0;
+      if (del > 250) {
+        anomalias.push(`⚠️ ${c.crotal} es GESTANTE (eco ${lastEco.fecha}) y sigue en ${lote.nombre} con DEL=${del} — ¿debería estar en proceso de secado?`);
+      }
+    }
+  });
+
+  // 7. Cabras sin lote asignado pero con producción
+  data.cabras.filter(c => !c.lote_id).forEach(c => {
+    const p = prodById[c.id];
+    if (p && p.litros > 0) {
+      anomalias.push(`🔍 ${c.crotal} produce ${p.litros.toFixed(1)}L pero NO tiene lote asignado — asignar lote.`);
+    }
+  });
+
+  if (anomalias.length > 0) {
+    lines.push(`\n🔍 ANOMALÍAS DETECTADAS (${anomalias.length}) — posibles errores humanos o de gestión:`);
+    anomalias.forEach(a => lines.push(`  ${a}`));
+  }
+  
   return lines.join("\n");
 }
 
@@ -153,7 +245,7 @@ function useSupabaseData() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR, anotacionesR, alertasSanR, chatsR] = await Promise.all([
+      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR, anotacionesR, alertasSanR, chatsR, anomaliasR] = await Promise.all([
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre), riia, id_electronico"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
@@ -171,6 +263,7 @@ function useSupabaseData() {
         supabase.from("anotacion_veterinaria").select("*, cabra:cabra_id(crotal)").order("fecha", { ascending: false }).limit(200),
         supabase.from("alerta_sanitaria").select("*").order("fecha", { ascending: false }).limit(200),
         supabase.from("chat_guardado").select("*").order("fecha", { ascending: false }).limit(50),
+        supabase.from("anomalia_detectada").select("*").order("fecha", { ascending: false }).limit(300),
       ]);
 
       // Process lotes with counts
@@ -198,6 +291,7 @@ function useSupabaseData() {
         anotaciones: anotacionesR.data || [],
         alertasSanitarias: alertasSanR.data || [],
         chatsGuardados: chatsR.data || [],
+        anomalias: anomaliasR.data || [],
       });
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -1701,6 +1795,70 @@ function ConsultasPage({ data, saveChat }) {
           ctx += `\n    ${e.cabra?.crotal || '?'}: ${e.fecha}, ${e.resultado}`;
         });
       });
+    }
+    
+    // CUBRICIÓN / REPRODUCCIÓN — Full data for Lote 1, 4, and vacías del 6
+    if (msg.includes("cubri") || msg.includes("macho") || msg.includes("implant") || msg.includes("insemin") || msg.includes("parid") && (msg.includes("prep") || msg.includes("octubre") || msg.includes("enero") || msg.includes("mayo")) || msg.includes("reproduc") || msg.includes("fertilid") || msg.includes("celo")) {
+      ctx += `\n\n${'='.repeat(50)}\nDATOS PARA ANÁLISIS DE CUBRICIÓN\n${'='.repeat(50)}`;
+      
+      // Estado de cada lote
+      ctx += `\n\nESTADO DE LOTES:`;
+      data.lotes.filter(l => l.cabras > 0).forEach(l => {
+        ctx += `\n  ${l.nombre} [${l.estado || 'produccion'}]: ${l.cabras} cabras`;
+      });
+
+      // Ecografías vacías recientes (candidatas del Lote 6)
+      const vaciasByC2 = {};
+      data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
+        const cr = e.cabra?.crotal;
+        if (cr) { if (!vaciasByC2[cr]) vaciasByC2[cr] = []; vaciasByC2[cr].push(e); }
+      });
+
+      // ALL cabras from Lote 1 and 4 with full data
+      const candidateLotes = data.lotes.filter(l => l.nombre.includes("Lote 1") || l.nombre.includes("Lote 4"));
+      const candidateLoteIds = new Set(candidateLotes.map(l => l.id));
+      
+      ctx += `\n\n📋 CABRAS LOTE 1 Y LOTE 4 — CANDIDATAS A CUBRICIÓN:`;
+      ctx += `\n(Formato: Crotal, Litros/día, DEL, Lactación, Conductividad, Lote, Ecografías, Anotaciones)`;
+      
+      const candidateCabras = data.cabras.filter(c => candidateLoteIds.has(c.lote_id));
+      candidateCabras.forEach(c => {
+        const p = prodByCabraId[c.id];
+        const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+        const lastEco = ecos.length > 0 ? ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0] : null;
+        const vaciaCount = ecos.filter(e => e.resultado === 'vacia').length;
+        const anots = (data.anotaciones || []).filter(a => a.cabra_id === c.id);
+        const partos = data.partos.filter(pp => pp.cabra?.crotal === c.crotal);
+        const abortos = partos.filter(pp => pp.tipo === 'aborto').length;
+        
+        ctx += `\n  ${c.crotal}: ${p ? p.litros + 'L' : 'sin prod'}, DEL=${p?.dia_lactacion || c.dias_en_leche || '?'}, L${c.num_lactaciones || '?'}, Cond=${p?.conductividad || '?'}, ${c.lote?.nombre || '?'}`;
+        if (lastEco) ctx += `, ÚltimaEco=${lastEco.fecha}:${lastEco.resultado}`;
+        if (vaciaCount >= 2) ctx += `, 🔴DOBLE_VACÍA(${vaciaCount}x)`;
+        if (abortos > 0) ctx += `, ⚠️ABORTO(${abortos}x)`;
+        if (anots.length > 0) ctx += `, 📋${anots.length}notas`;
+      });
+
+      // Vacías del Lote 6
+      const lote6 = data.lotes.find(l => l.nombre.includes("Lote 6"));
+      if (lote6) {
+        const lote6Cabras = data.cabras.filter(c => c.lote_id === lote6.id);
+        const vaciasL6 = lote6Cabras.filter(c => {
+          const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+          const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+          return lastEco && lastEco.resultado === 'vacia';
+        });
+        if (vaciasL6.length > 0) {
+          ctx += `\n\n⚠️ VACÍAS DEL LOTE 6 (deben entrar a cubrición):`;
+          vaciasL6.forEach(c => {
+            const p = prodByCabraId[c.id];
+            ctx += `\n  ${c.crotal}: ${p ? p.litros + 'L' : 'sin prod'}, DEL=${p?.dia_lactacion || c.dias_en_leche || '?'}, L${c.num_lactaciones || '?'}`;
+          });
+        }
+      }
+
+      ctx += `\n\nRECORDATORIO: Solo Lote 1 y 4 + vacías Lote 6 pueden entrar. Lote 3/5/13/2/6(gestantes) = PROHIBIDO.`;
+      ctx += `\nFranja normal: 150-220 DEL al momento de ENTRAR CON MACHOS. Buenas prod → estirar a 210. Malas → adelantar.`;
+      ctx += `\nInseminación = 30 mejores por genética+producción+salud. Resto = monta natural.`;
     }
     
     // Include lote details when relevant
@@ -3397,6 +3555,284 @@ function SanidadPage({ data, refresh, saveChat }) {
 // ==========================================
 // CHATS GUARDADOS
 // ==========================================
+// ==========================================
+// ANOMALÍAS — Control de errores y revisiones
+// ==========================================
+function detectAnomalias(data) {
+  const anomalias = [];
+  const prod = data.produccion || [];
+  const latestDate = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a))[0];
+  const todayProd = latestDate ? prod.filter(p => p.fecha === latestDate) : [];
+  const prodById = {};
+  todayProd.forEach(p => { prodById[p.cabra_id] = p; });
+
+  const loteDEL = {};
+  data.cabras.forEach(c => {
+    const lote = data.lotes.find(l => l.id === c.lote_id);
+    if (!lote) return;
+    const p = prodById[c.id];
+    const del = p?.dia_lactacion || c.dias_en_leche || 0;
+    if (!loteDEL[lote.nombre]) loteDEL[lote.nombre] = { dels: [], lote };
+    loteDEL[lote.nombre].dels.push({ crotal: c.crotal, del, litros: p?.litros || 0, cabra_id: c.id, conductividad: p?.conductividad || 0 });
+  });
+
+  Object.entries(loteDEL).forEach(([loteName, info]) => {
+    if (info.dels.length < 3) return;
+    const avgDEL = info.dels.reduce((s, d) => s + d.del, 0) / info.dels.length;
+    const estado = info.lote.estado || 'produccion';
+
+    info.dels.forEach(d => {
+      if (Math.abs(d.del - avgDEL) > 100 && d.del > 0) {
+        anomalias.push({ tipo: "lote_incorrecto", severidad: "media", crotal: d.crotal, lote: loteName,
+          descripcion: `DEL=${d.del} (media lote=${Math.round(avgDEL)}). Diferencia de ${Math.abs(Math.round(d.del - avgDEL))} días.`,
+          hipotesis: `Esta cabra tiene un DEL muy diferente al resto del lote. Probablemente se quedó en este lote por error después de un cambio de grupo o una importación.`,
+          accion: `Revisar si esta cabra debería estar en otro lote según su estado reproductivo y días de lactación.` });
+      }
+      if (estado === 'secandose' && d.litros > 3.0) {
+        anomalias.push({ tipo: "secado_sospechoso", severidad: "alta", crotal: d.crotal, lote: loteName,
+          descripcion: `Produce ${d.litros.toFixed(1)}L en lote marcado como secándose.`,
+          hipotesis: `Esta cabra aún produce bien. Puede que se haya incluido por error en el grupo de secado, o que el secado no se haya iniciado correctamente.`,
+          accion: `Verificar si esta cabra debe seguir ordeñándose o si el protocolo de secado se ha aplicado.` });
+      }
+      if ((loteName.includes("Lote 5") || loteName.includes("Lote 13")) && d.del > 150) {
+        anomalias.push({ tipo: "lote_incorrecto", severidad: "alta", crotal: d.crotal, lote: loteName,
+          descripcion: `DEL=${d.del} en lote de recién paridas.`,
+          hipotesis: `Las cabras de este lote deberían tener pocos DEL (paridas ene/feb). Esta cabra lleva demasiado tiempo y no se movió al lote de cubrición.`,
+          accion: `Mover a Lote 1 o 4 para evaluación de cubrición. Si cumple requisitos, preparar para próxima paridera.` });
+      }
+      if (loteName.includes("Lote 2") && d.del > 100) {
+        anomalias.push({ tipo: "parto_no_registrado", severidad: "media", crotal: d.crotal, lote: loteName,
+          descripcion: `DEL=${d.del} en lote de pariendo.`,
+          hipotesis: `Esta cabra probablemente ya parió pero no se registró el parto ni se movió de lote.`,
+          accion: `Confirmar si parió, registrar el parto en el sistema y mover al lote correspondiente.` });
+      }
+    });
+  });
+
+  // Vacías en Lote 6
+  const lote6 = data.lotes.find(l => l.nombre && l.nombre.includes("Lote 6"));
+  if (lote6) {
+    data.cabras.filter(c => c.lote_id === lote6.id).forEach(c => {
+      const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+      if (ecos.length > 0) {
+        const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+        if (lastEco.resultado === 'vacia') {
+          anomalias.push({ tipo: "vacia_sin_mover", severidad: "alta", crotal: c.crotal, lote: "Lote 6",
+            descripcion: `Última eco VACÍA (${lastEco.fecha}) pero sigue en Lote 6 con gestantes.`,
+            hipotesis: `Después de las ecografías, esta cabra debió moverse a cubrición pero se quedó con las gestantes por error humano. Cada día que pasa pierde tiempo reproductivo.`,
+            accion: `Mover INMEDIATAMENTE a Lote 1 o 4 y preparar para cubrición en la próxima paridera.` });
+        }
+      }
+    });
+  }
+
+  // Gestantes en lote producción sin secado
+  data.cabras.forEach(c => {
+    const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+    if (ecos.length === 0) return;
+    const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    const lote = data.lotes.find(l => l.id === c.lote_id);
+    if (lastEco.resultado === 'gestante' && lote && (lote.nombre.includes("Lote 1") || lote.nombre.includes("Lote 4"))) {
+      const p = prodById[c.id];
+      const del = p?.dia_lactacion || c.dias_en_leche || 0;
+      if (del > 250) {
+        anomalias.push({ tipo: "secado_pendiente", severidad: "alta", crotal: c.crotal, lote: lote.nombre,
+          descripcion: `GESTANTE (eco ${lastEco.fecha}) con DEL=${del}, sigue en producción.`,
+          hipotesis: `Esta cabra confirmó gestación pero no se ha iniciado el proceso de secado. Con >250 DEL y gestante, debería estar preparándose para secar.`,
+          accion: `Evaluar fecha de parto estimada y programar secado. Mover a lote de secas si corresponde.` });
+      }
+    }
+  });
+
+  // Sin lote con producción
+  data.cabras.filter(c => !c.lote_id).forEach(c => {
+    const p = prodById[c.id];
+    if (p && p.litros > 0) {
+      anomalias.push({ tipo: "sin_lote", severidad: "media", crotal: c.crotal, lote: "Sin lote",
+        descripcion: `Produce ${p.litros.toFixed(1)}L pero no tiene lote asignado.`,
+        hipotesis: `Esta cabra se creó o importó sin asignar lote. Puede ser nueva del censo o un error de importación del FLM.`,
+        accion: `Asignar al lote correspondiente según su estado reproductivo y días de lactación.` });
+    }
+  });
+
+  return anomalias;
+}
+
+function AnomalíasPage({ data, refresh }) {
+  const [filtro, setFiltro] = useState("todas");
+  const [expandedId, setExpandedId] = useState(null);
+
+  // Detect current anomalies from live data
+  const anomaliasVivas = detectAnomalias(data);
+  // Persisted anomalies from Supabase
+  const anomaliasBD = data.anomalias || [];
+
+  // Auto-persist new anomalies
+  useEffect(() => {
+    const persistir = async () => {
+      const today = new Date().toISOString().split("T")[0];
+      const todayBD = anomaliasBD.filter(a => a.fecha === today);
+      // Only persist if we haven't already today
+      if (todayBD.length > 0 || anomaliasVivas.length === 0) return;
+      const toInsert = anomaliasVivas.map(a => ({
+        fecha: today, tipo: a.tipo, severidad: a.severidad, crotal: a.crotal,
+        lote_nombre: a.lote, descripcion: a.descripcion, hipotesis: a.hipotesis, accion: a.accion,
+      }));
+      if (toInsert.length > 0) {
+        await supabase.from("anomalia_detectada").insert(toInsert);
+        refresh();
+      }
+    };
+    persistir();
+  }, [anomaliasVivas.length]);
+
+  const updateEstado = async (id, estado, notas) => {
+    const updates = { estado };
+    if (estado === "resuelta") updates.resuelto_at = new Date().toISOString();
+    if (notas) updates.notas_resolucion = notas;
+    await supabase.from("anomalia_detectada").update(updates).eq("id", id);
+    refresh();
+  };
+
+  const tipoConfig = {
+    lote_incorrecto: { icon: "🔀", label: "Lote Incorrecto", color: "#E8950A" },
+    secado_sospechoso: { icon: "⏸️", label: "Secado Sospechoso", color: "#7C3AED" },
+    vacia_sin_mover: { icon: "🔴", label: "Vacía Sin Mover", color: "#DC2626" },
+    secado_pendiente: { icon: "⏳", label: "Secado Pendiente", color: "#DB2777" },
+    parto_no_registrado: { icon: "🍼", label: "Parto No Registrado", color: "#EA580C" },
+    sin_lote: { icon: "❓", label: "Sin Lote", color: "#0891B2" },
+  };
+  const estadoConfig = {
+    pendiente: { label: "Pendiente", color: "#DC2626", bg: "#FEF2F2" },
+    revisando: { label: "Revisando", color: "#E8950A", bg: "#FEF9EE" },
+    resuelta: { label: "Resuelta", color: "#059669", bg: "#F0FDF4" },
+  };
+
+  // Combine live + persisted, dedup by crotal+tipo for today
+  const today = new Date().toISOString().split("T")[0];
+  const allAnomalias = anomaliasBD.length > 0 ? anomaliasBD : anomaliasVivas.map((a, i) => ({ ...a, id: `live-${i}`, fecha: today, estado: "pendiente" }));
+  
+  const filtered = filtro === "todas" ? allAnomalias : filtro === "vivas" ? allAnomalias.filter(a => a.estado === "pendiente" || a.estado === "revisando") : allAnomalias.filter(a => a.tipo === filtro);
+  const pendientes = allAnomalias.filter(a => a.estado === "pendiente").length;
+  const revisando = allAnomalias.filter(a => a.estado === "revisando").length;
+
+  // Group by tipo
+  const byTipo = {};
+  filtered.forEach(a => { const t = a.tipo || "otro"; if (!byTipo[t]) byTipo[t] = []; byTipo[t].push(a); });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Summary KPIs */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+        <div onClick={() => setFiltro("todas")} style={{ background: filtro === "todas" ? "#1E293B" : "#FFF", border: "1px solid #EEF2F6", borderRadius: 14, padding: "16px 20px", cursor: "pointer", transition: "all .2s" }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: filtro === "todas" ? "#FFF" : "#1E293B", fontFamily: "'Space Mono', monospace" }}>{allAnomalias.length}</div>
+          <div style={{ fontSize: 11, color: filtro === "todas" ? "#94A3B8" : "#94A3B8", marginTop: 2 }}>Total anomalías</div>
+        </div>
+        <div onClick={() => setFiltro("vivas")} style={{ background: filtro === "vivas" ? "#DC2626" : "#FEF2F2", border: "1px solid #FECACA", borderRadius: 14, padding: "16px 20px", cursor: "pointer" }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: filtro === "vivas" ? "#FFF" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>{pendientes}</div>
+          <div style={{ fontSize: 11, color: filtro === "vivas" ? "#FFF" : "#94A3B8", marginTop: 2 }}>Pendientes</div>
+        </div>
+        <div style={{ background: "#FEF9EE", border: "1px solid #FDE68A", borderRadius: 14, padding: "16px 20px" }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace" }}>{revisando}</div>
+          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>En revisión</div>
+        </div>
+        <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 14, padding: "16px 20px" }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#059669", fontFamily: "'Space Mono', monospace" }}>{allAnomalias.filter(a => a.estado === "resuelta").length}</div>
+          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>Resueltas</div>
+        </div>
+      </div>
+
+      {/* Filter by type */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {Object.entries(tipoConfig).map(([tipo, cfg]) => {
+          const count = allAnomalias.filter(a => a.tipo === tipo).length;
+          if (count === 0) return null;
+          return (
+            <button key={tipo} onClick={() => setFiltro(filtro === tipo ? "todas" : tipo)} style={{
+              padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              border: filtro === tipo ? `2px solid ${cfg.color}` : "1px solid #E2E8F0",
+              background: filtro === tipo ? `${cfg.color}12` : "#FFF",
+              color: filtro === tipo ? cfg.color : "#64748B",
+            }}>{cfg.icon} {cfg.label} ({count})</button>
+          );
+        })}
+      </div>
+
+      {/* Anomaly cards */}
+      {Object.entries(byTipo).map(([tipo, items]) => {
+        const cfg = tipoConfig[tipo] || { icon: "🔍", label: tipo, color: "#64748B" };
+        return (
+          <div key={tipo}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: cfg.color, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 18 }}>{cfg.icon}</span> {cfg.label} ({items.length})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {items.map((a, i) => {
+                const ec = estadoConfig[a.estado] || estadoConfig.pendiente;
+                const isExpanded = expandedId === (a.id || `${tipo}-${i}`);
+                return (
+                  <div key={a.id || i} style={{ background: "#FFF", border: `1px solid ${a.estado === "pendiente" ? cfg.color + "40" : "#EEF2F6"}`, borderRadius: 14, overflow: "hidden", transition: "all .2s" }}>
+                    {/* Header - clickable */}
+                    <div onClick={() => setExpandedId(isExpanded ? null : (a.id || `${tipo}-${i}`))}
+                      style={{ padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#F8FAFC"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+                        <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Space Mono', monospace", color: "#1E293B", minWidth: 60 }}>{a.crotal || "-"}</span>
+                        <span style={{ fontSize: 12, color: "#64748B", flex: 1 }}>{a.descripcion}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, color: "#94A3B8" }}>{a.lote_nombre || a.lote}</span>
+                        <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: ec.bg, color: ec.color, fontWeight: 600 }}>{ec.label}</span>
+                        <span style={{ fontSize: 11, color: "#94A3B8" }}>{isExpanded ? "▲" : "▼"}</span>
+                      </div>
+                    </div>
+
+                    {/* Expanded detail */}
+                    {isExpanded && (
+                      <div style={{ padding: "0 18px 16px", borderTop: "1px solid #F1F5F9", animation: "fadeSlideIn .2s" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+                          <div style={{ background: "#F8FAFC", borderRadius: 10, padding: 14 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", marginBottom: 6 }}>🔍 Hipótesis</div>
+                            <div style={{ fontSize: 12.5, color: "#334155", lineHeight: 1.6 }}>{a.hipotesis || "Sin hipótesis disponible"}</div>
+                          </div>
+                          <div style={{ background: "#F0FDF4", borderRadius: 10, padding: 14 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", textTransform: "uppercase", marginBottom: 6 }}>✅ Acción Recomendada</div>
+                            <div style={{ fontSize: 12.5, color: "#334155", lineHeight: 1.6 }}>{a.accion || "Sin acción definida"}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+                          <span style={{ fontSize: 11, color: "#94A3B8", padding: "6px 0", flex: 1 }}>Detectada: {a.fecha} · {a.severidad}</span>
+                          {a.id && typeof a.id === "number" && a.estado !== "resuelta" && (<>
+                            <button onClick={() => updateEstado(a.id, "revisando")} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #FDE68A", background: "#FEF9EE", color: "#E8950A", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>👁️ Revisando</button>
+                            <button onClick={() => updateEstado(a.id, "resuelta")} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#059669", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>✓ Resuelta</button>
+                          </>)}
+                          {a.estado === "resuelta" && <span style={{ fontSize: 11, color: "#059669", fontWeight: 600, padding: "6px 0" }}>✓ Resuelta {a.resuelto_at ? new Date(a.resuelto_at).toLocaleDateString("es-ES") : ""}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {filtered.length === 0 && (
+        <div style={{ textAlign: "center", padding: 60 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#059669", marginBottom: 8 }}>Sin anomalías</div>
+          <div style={{ fontSize: 14, color: "#94A3B8" }}>No se han detectado errores de gestión en los datos actuales.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// CHATS GUARDADOS
+// ==========================================
 function GuardadosPage({ data, refresh }) {
   const [viewChat, setViewChat] = useState(null);
   const chats = data.chatsGuardados || [];
@@ -3484,6 +3920,7 @@ const NAV = [
   { id: "rentabilidad", icon: "💰", label: "Rentabilidad" },
   { id: "importador", icon: "📁", label: "Importador" },
   { id: "consultas", icon: "💬", label: "Consultas" },
+  { id: "anomalias", icon: "🔍", label: "Anomalías" },
   { id: "guardados", icon: "💾", label: "Guardados" },
   { id: "config", icon: "⚙️", label: "Config" },
 ];
@@ -3567,7 +4004,7 @@ export default function App() {
       <div style={{ padding: "22px 28px", maxWidth: 1360, margin: "0 auto" }}>
         <div style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 23, fontWeight: 800, color: "#1E293B", letterSpacing: "-.02em" }}>
-            {{ dashboard: "Dashboard", produccion: "Producción & Análisis", sanidad: "Centro de Control Sanitario", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", guardados: "Chats Guardados", config: "Configuración" }[page]}
+            {{ dashboard: "Dashboard", produccion: "Producción & Análisis", sanidad: "Centro de Control Sanitario", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", anomalias: "Control de Anomalías", guardados: "Chats Guardados", config: "Configuración" }[page]}
           </div>
           <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 3 }}>
             {{ dashboard: `Datos en vivo de Supabase · ${data.cabras.length} cabras · ${data.parideras.length} parideras`,
@@ -3576,6 +4013,7 @@ export default function App() {
               rentabilidad: "Análisis financiero · Previsión de producción · Control de ingresos y gastos",
               importador: "Sube CSV del FLM y se importa automáticamente a Supabase",
               consultas: "Pregunta lo que quieras — respuestas con datos reales",
+              anomalias: "Errores de gestión, cabras mal ubicadas, revisiones pendientes",
               guardados: `${(data.chatsGuardados || []).length} conversaciones guardadas`,
               config: `${data.reglas.length} reglas · ${data.protocolos.length} protocolos veterinarios` }[page]}
           </div>
@@ -3586,6 +4024,7 @@ export default function App() {
         <div style={{ display: page === "rentabilidad" ? "block" : "none" }}><RentabilidadPage data={data} saveChat={saveChat} /></div>
         <div style={{ display: page === "importador" ? "block" : "none" }}><ImportadorPage data={data} refresh={refresh} saveChat={saveChat} /></div>
         <div style={{ display: page === "consultas" ? "block" : "none" }}><ConsultasPage data={data} saveChat={saveChat} /></div>
+        <div style={{ display: page === "anomalias" ? "block" : "none" }}><AnomalíasPage data={data} refresh={refresh} /></div>
         <div style={{ display: page === "guardados" ? "block" : "none" }}><GuardadosPage data={data} refresh={refresh} /></div>
         {page === "config" && <ConfigPage data={data} refresh={refresh} />}
       </div>

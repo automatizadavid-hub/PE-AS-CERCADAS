@@ -3658,20 +3658,17 @@ function detectAnomalias(data) {
 }
 
 function AnomalíasPage({ data, refresh }) {
-  const [filtro, setFiltro] = useState("todas");
+  const [vista, setVista] = useState("pendientes");
+  const [filtroTipo, setFiltroTipo] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
 
-  // Detect current anomalies from live data
   const anomaliasVivas = detectAnomalias(data);
-  // Persisted anomalies from Supabase
   const anomaliasBD = data.anomalias || [];
 
-  // Auto-persist new anomalies
   useEffect(() => {
     const persistir = async () => {
       const today = new Date().toISOString().split("T")[0];
       const todayBD = anomaliasBD.filter(a => a.fecha === today);
-      // Only persist if we haven't already today
       if (todayBD.length > 0 || anomaliasVivas.length === 0) return;
       const toInsert = anomaliasVivas.map(a => ({
         fecha: today, tipo: a.tipo, severidad: a.severidad, crotal: a.crotal,
@@ -3685,10 +3682,9 @@ function AnomalíasPage({ data, refresh }) {
     persistir();
   }, [anomaliasVivas.length]);
 
-  const updateEstado = async (id, estado, notas) => {
+  const updateEstado = async (id, estado) => {
     const updates = { estado };
     if (estado === "resuelta") updates.resuelto_at = new Date().toISOString();
-    if (notas) updates.notas_resolucion = notas;
     await supabase.from("anomalia_detectada").update(updates).eq("id", id);
     refresh();
   };
@@ -3701,133 +3697,127 @@ function AnomalíasPage({ data, refresh }) {
     parto_no_registrado: { icon: "🍼", label: "Parto No Registrado", color: "#EA580C" },
     sin_lote: { icon: "❓", label: "Sin Lote", color: "#0891B2" },
   };
-  const estadoConfig = {
-    pendiente: { label: "Pendiente", color: "#DC2626", bg: "#FEF2F2" },
-    revisando: { label: "Revisando", color: "#E8950A", bg: "#FEF9EE" },
-    resuelta: { label: "Resuelta", color: "#059669", bg: "#F0FDF4" },
-  };
 
-  // Combine live + persisted, dedup by crotal+tipo for today
   const today = new Date().toISOString().split("T")[0];
   const allAnomalias = anomaliasBD.length > 0 ? anomaliasBD : anomaliasVivas.map((a, i) => ({ ...a, id: `live-${i}`, fecha: today, estado: "pendiente" }));
-  
-  const filtered = filtro === "todas" ? allAnomalias : filtro === "vivas" ? allAnomalias.filter(a => a.estado === "pendiente" || a.estado === "revisando") : allAnomalias.filter(a => a.tipo === filtro);
-  const pendientes = allAnomalias.filter(a => a.estado === "pendiente").length;
-  const revisando = allAnomalias.filter(a => a.estado === "revisando").length;
-
-  // Group by tipo
+  const pendientes = allAnomalias.filter(a => a.estado === "pendiente");
+  const enRevision = allAnomalias.filter(a => a.estado === "revisando");
+  const resueltas = allAnomalias.filter(a => a.estado === "resuelta");
+  const currentList = vista === "pendientes" ? pendientes : vista === "revisando" ? enRevision : resueltas;
+  const filtered = filtroTipo ? currentList.filter(a => a.tipo === filtroTipo) : currentList;
   const byTipo = {};
   filtered.forEach(a => { const t = a.tipo || "otro"; if (!byTipo[t]) byTipo[t] = []; byTipo[t].push(a); });
 
+  const renderCard = (a, i, tipo) => {
+    const cfg = tipoConfig[tipo] || { icon: "🔍", label: tipo, color: "#64748B" };
+    const isExpanded = expandedId === (a.id || `${tipo}-${i}`);
+    return (
+      <div key={a.id || i} style={{ background: "#FFF", border: `1px solid ${a.estado === "pendiente" ? cfg.color + "40" : "#EEF2F6"}`, borderRadius: 14, overflow: "hidden" }}>
+        <div onClick={() => setExpandedId(isExpanded ? null : (a.id || `${tipo}-${i}`))}
+          style={{ padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          onMouseEnter={e => e.currentTarget.style.background = "#F8FAFC"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+            <span style={{ fontSize: 15 }}>{cfg.icon}</span>
+            <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Space Mono', monospace", color: "#1E293B", minWidth: 60 }}>{a.crotal || "-"}</span>
+            <span style={{ fontSize: 12, color: "#64748B", flex: 1 }}>{a.descripcion}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <span style={{ fontSize: 10, color: "#94A3B8" }}>{a.lote_nombre || a.lote}</span>
+            <span style={{ fontSize: 10, color: "#94A3B8" }}>{a.fecha}</span>
+            <span style={{ fontSize: 11, color: "#94A3B8" }}>{isExpanded ? "▲" : "▼"}</span>
+          </div>
+        </div>
+        {isExpanded && (
+          <div style={{ padding: "0 18px 16px", borderTop: "1px solid #F1F5F9", animation: "fadeSlideIn .2s" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+              <div style={{ background: "#F8FAFC", borderRadius: 10, padding: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", marginBottom: 6 }}>🔍 Hipótesis</div>
+                <div style={{ fontSize: 12.5, color: "#334155", lineHeight: 1.6 }}>{a.hipotesis || "Sin hipótesis disponible"}</div>
+              </div>
+              <div style={{ background: "#F0FDF4", borderRadius: 10, padding: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", textTransform: "uppercase", marginBottom: 6 }}>✅ Acción Recomendada</div>
+                <div style={{ fontSize: 12.5, color: "#334155", lineHeight: 1.6 }}>{a.accion || "Sin acción definida"}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+              <span style={{ fontSize: 11, color: "#94A3B8", padding: "6px 0", flex: 1 }}>Detectada: {a.fecha} · Severidad: {a.severidad}</span>
+              {a.id && typeof a.id === "number" && a.estado === "pendiente" && (<>
+                <button onClick={e => { e.stopPropagation(); updateEstado(a.id, "revisando"); }} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #FDE68A", background: "#FEF9EE", color: "#E8950A", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>👁️ En revisión</button>
+                <button onClick={e => { e.stopPropagation(); updateEstado(a.id, "resuelta"); }} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#059669", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>✓ Resuelta</button>
+              </>)}
+              {a.id && typeof a.id === "number" && a.estado === "revisando" && (
+                <button onClick={e => { e.stopPropagation(); updateEstado(a.id, "resuelta"); }} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#059669", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>✓ Marcar resuelta</button>
+              )}
+              {a.estado === "resuelta" && a.resuelto_at && <span style={{ fontSize: 11, color: "#059669", fontWeight: 600 }}>✓ Resuelta el {new Date(a.resuelto_at).toLocaleDateString("es-ES")}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Summary KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-        <div onClick={() => setFiltro("todas")} style={{ background: filtro === "todas" ? "#1E293B" : "#FFF", border: "1px solid #EEF2F6", borderRadius: 14, padding: "16px 20px", cursor: "pointer", transition: "all .2s" }}>
-          <div style={{ fontSize: 28, fontWeight: 800, color: filtro === "todas" ? "#FFF" : "#1E293B", fontFamily: "'Space Mono', monospace" }}>{allAnomalias.length}</div>
-          <div style={{ fontSize: 11, color: filtro === "todas" ? "#94A3B8" : "#94A3B8", marginTop: 2 }}>Total anomalías</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+        <div onClick={() => { setVista("pendientes"); setFiltroTipo(null); setExpandedId(null); }}
+          style={{ background: vista === "pendientes" ? "#DC2626" : "#FEF2F2", border: `2px solid ${vista === "pendientes" ? "#DC2626" : "#FECACA"}`, borderRadius: 16, padding: "20px 24px", cursor: "pointer", transition: "all .2s" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <span style={{ fontSize: 22 }}>🔴</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: vista === "pendientes" ? "#FFF" : "#DC2626" }}>Pendientes</span>
+          </div>
+          <div style={{ fontSize: 36, fontWeight: 800, color: vista === "pendientes" ? "#FFF" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>{pendientes.length}</div>
+          <div style={{ fontSize: 11, color: vista === "pendientes" ? "#FECACA" : "#94A3B8", marginTop: 2 }}>Requieren atención inmediata</div>
         </div>
-        <div onClick={() => setFiltro("vivas")} style={{ background: filtro === "vivas" ? "#DC2626" : "#FEF2F2", border: "1px solid #FECACA", borderRadius: 14, padding: "16px 20px", cursor: "pointer" }}>
-          <div style={{ fontSize: 28, fontWeight: 800, color: filtro === "vivas" ? "#FFF" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>{pendientes}</div>
-          <div style={{ fontSize: 11, color: filtro === "vivas" ? "#FFF" : "#94A3B8", marginTop: 2 }}>Pendientes</div>
+        <div onClick={() => { setVista("revisando"); setFiltroTipo(null); setExpandedId(null); }}
+          style={{ background: vista === "revisando" ? "#E8950A" : "#FEF9EE", border: `2px solid ${vista === "revisando" ? "#E8950A" : "#FDE68A"}`, borderRadius: 16, padding: "20px 24px", cursor: "pointer", transition: "all .2s" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <span style={{ fontSize: 22 }}>👁️</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: vista === "revisando" ? "#FFF" : "#E8950A" }}>En revisión</span>
+          </div>
+          <div style={{ fontSize: 36, fontWeight: 800, color: vista === "revisando" ? "#FFF" : "#E8950A", fontFamily: "'Space Mono', monospace" }}>{enRevision.length}</div>
+          <div style={{ fontSize: 11, color: vista === "revisando" ? "#FDE68A" : "#94A3B8", marginTop: 2 }}>Estás trabajando en ellas</div>
         </div>
-        <div style={{ background: "#FEF9EE", border: "1px solid #FDE68A", borderRadius: 14, padding: "16px 20px" }}>
-          <div style={{ fontSize: 28, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace" }}>{revisando}</div>
-          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>En revisión</div>
-        </div>
-        <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 14, padding: "16px 20px" }}>
-          <div style={{ fontSize: 28, fontWeight: 800, color: "#059669", fontFamily: "'Space Mono', monospace" }}>{allAnomalias.filter(a => a.estado === "resuelta").length}</div>
-          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>Resueltas</div>
+        <div onClick={() => { setVista("resueltas"); setFiltroTipo(null); setExpandedId(null); }}
+          style={{ background: vista === "resueltas" ? "#059669" : "#F0FDF4", border: `2px solid ${vista === "resueltas" ? "#059669" : "#BBF7D0"}`, borderRadius: 16, padding: "20px 24px", cursor: "pointer", transition: "all .2s" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <span style={{ fontSize: 22 }}>✅</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: vista === "resueltas" ? "#FFF" : "#059669" }}>Resueltas</span>
+          </div>
+          <div style={{ fontSize: 36, fontWeight: 800, color: vista === "resueltas" ? "#FFF" : "#059669", fontFamily: "'Space Mono', monospace" }}>{resueltas.length}</div>
+          <div style={{ fontSize: 11, color: vista === "resueltas" ? "#BBF7D0" : "#94A3B8", marginTop: 2 }}>Historial de correcciones</div>
         </div>
       </div>
-
-      {/* Filter by type */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {Object.entries(tipoConfig).map(([tipo, cfg]) => {
-          const count = allAnomalias.filter(a => a.tipo === tipo).length;
-          if (count === 0) return null;
-          return (
-            <button key={tipo} onClick={() => setFiltro(filtro === tipo ? "todas" : tipo)} style={{
-              padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              border: filtro === tipo ? `2px solid ${cfg.color}` : "1px solid #E2E8F0",
-              background: filtro === tipo ? `${cfg.color}12` : "#FFF",
-              color: filtro === tipo ? cfg.color : "#64748B",
-            }}>{cfg.icon} {cfg.label} ({count})</button>
-          );
-        })}
-      </div>
-
-      {/* Anomaly cards */}
+      {currentList.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={() => setFiltroTipo(null)} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: !filtroTipo ? "2px solid #1E293B" : "1px solid #E2E8F0", background: !filtroTipo ? "#1E293B" : "#FFF", color: !filtroTipo ? "#FFF" : "#64748B" }}>Todas ({currentList.length})</button>
+          {Object.entries(tipoConfig).map(([tipo, cfg]) => {
+            const count = currentList.filter(a => a.tipo === tipo).length;
+            if (count === 0) return null;
+            return <button key={tipo} onClick={() => setFiltroTipo(filtroTipo === tipo ? null : tipo)} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: filtroTipo === tipo ? `2px solid ${cfg.color}` : "1px solid #E2E8F0", background: filtroTipo === tipo ? `${cfg.color}12` : "#FFF", color: filtroTipo === tipo ? cfg.color : "#64748B" }}>{cfg.icon} {cfg.label} ({count})</button>;
+          })}
+        </div>
+      )}
       {Object.entries(byTipo).map(([tipo, items]) => {
         const cfg = tipoConfig[tipo] || { icon: "🔍", label: tipo, color: "#64748B" };
         return (
           <div key={tipo}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: cfg.color, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 18 }}>{cfg.icon}</span> {cfg.label} ({items.length})
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {items.map((a, i) => {
-                const ec = estadoConfig[a.estado] || estadoConfig.pendiente;
-                const isExpanded = expandedId === (a.id || `${tipo}-${i}`);
-                return (
-                  <div key={a.id || i} style={{ background: "#FFF", border: `1px solid ${a.estado === "pendiente" ? cfg.color + "40" : "#EEF2F6"}`, borderRadius: 14, overflow: "hidden", transition: "all .2s" }}>
-                    {/* Header - clickable */}
-                    <div onClick={() => setExpandedId(isExpanded ? null : (a.id || `${tipo}-${i}`))}
-                      style={{ padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#F8FAFC"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
-                        <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Space Mono', monospace", color: "#1E293B", minWidth: 60 }}>{a.crotal || "-"}</span>
-                        <span style={{ fontSize: 12, color: "#64748B", flex: 1 }}>{a.descripcion}</span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, color: "#94A3B8" }}>{a.lote_nombre || a.lote}</span>
-                        <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: ec.bg, color: ec.color, fontWeight: 600 }}>{ec.label}</span>
-                        <span style={{ fontSize: 11, color: "#94A3B8" }}>{isExpanded ? "▲" : "▼"}</span>
-                      </div>
-                    </div>
-
-                    {/* Expanded detail */}
-                    {isExpanded && (
-                      <div style={{ padding: "0 18px 16px", borderTop: "1px solid #F1F5F9", animation: "fadeSlideIn .2s" }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
-                          <div style={{ background: "#F8FAFC", borderRadius: 10, padding: 14 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", marginBottom: 6 }}>🔍 Hipótesis</div>
-                            <div style={{ fontSize: 12.5, color: "#334155", lineHeight: 1.6 }}>{a.hipotesis || "Sin hipótesis disponible"}</div>
-                          </div>
-                          <div style={{ background: "#F0FDF4", borderRadius: 10, padding: 14 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", textTransform: "uppercase", marginBottom: 6 }}>✅ Acción Recomendada</div>
-                            <div style={{ fontSize: 12.5, color: "#334155", lineHeight: 1.6 }}>{a.accion || "Sin acción definida"}</div>
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                          <span style={{ fontSize: 11, color: "#94A3B8", padding: "6px 0", flex: 1 }}>Detectada: {a.fecha} · {a.severidad}</span>
-                          {a.id && typeof a.id === "number" && a.estado !== "resuelta" && (<>
-                            <button onClick={() => updateEstado(a.id, "revisando")} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #FDE68A", background: "#FEF9EE", color: "#E8950A", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>👁️ Revisando</button>
-                            <button onClick={() => updateEstado(a.id, "resuelta")} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#059669", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>✓ Resuelta</button>
-                          </>)}
-                          {a.estado === "resuelta" && <span style={{ fontSize: 11, color: "#059669", fontWeight: 600, padding: "6px 0" }}>✓ Resuelta {a.resuelto_at ? new Date(a.resuelto_at).toLocaleDateString("es-ES") : ""}</span>}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: cfg.color, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>{cfg.icon}</span> {cfg.label} ({items.length})</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{items.map((a, i) => renderCard(a, i, tipo))}</div>
           </div>
         );
       })}
-
       {filtered.length === 0 && (
         <div style={{ textAlign: "center", padding: 60 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#059669", marginBottom: 8 }}>Sin anomalías</div>
-          <div style={{ fontSize: 14, color: "#94A3B8" }}>No se han detectado errores de gestión en los datos actuales.</div>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>{vista === "pendientes" ? "✅" : vista === "revisando" ? "👁️" : "📋"}</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: vista === "pendientes" ? "#059669" : "#64748B", marginBottom: 8 }}>{vista === "pendientes" ? "Sin anomalías pendientes" : vista === "revisando" ? "Nada en revisión" : "Sin historial"}</div>
+          <div style={{ fontSize: 14, color: "#94A3B8" }}>{vista === "pendientes" ? "Todo en orden — no se detectan errores." : vista === "revisando" ? "No hay anomalías en revisión." : "Las resueltas aparecerán aquí."}</div>
         </div>
       )}
     </div>
   );
 }
+
+
 
 // ==========================================
 // CHATS GUARDADOS

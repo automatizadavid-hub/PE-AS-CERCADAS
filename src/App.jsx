@@ -30,7 +30,14 @@ async function askClaude(message, dataContext, chatType = "general") {
 function buildDataContext(data) {
   if (!data) return "";
   const lines = [];
-  lines.push(`Total cabras: ${data.cabras.length}`);
+  
+  // CRITICAL: Complete list of valid crotals — Claude MUST NOT mention any crotal not in this list
+  const allCrotals = data.cabras.map(c => c.crotal).sort();
+  lines.push(`⚠️ CROTALES VÁLIDOS EN EL SISTEMA (${allCrotals.length} cabras). Si un crotal NO está en esta lista, NO EXISTE:`);
+  // Send in compact format to save tokens
+  lines.push(allCrotals.join(", "));
+  
+  lines.push(`\nTotal cabras: ${data.cabras.length}`);
   
   // Lotes with counts AND estado
   const loteCounts = {};
@@ -146,8 +153,8 @@ function useSupabaseData() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR, anotacionesR, alertasSanR] = await Promise.all([
-        supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre)"),
+      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR, anotacionesR, alertasSanR, chatsR] = await Promise.all([
+        supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre), riia, id_electronico"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
         supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
@@ -163,6 +170,7 @@ function useSupabaseData() {
         supabase.from("resumen_diario").select("*").order("fecha", { ascending: false }).limit(30),
         supabase.from("anotacion_veterinaria").select("*, cabra:cabra_id(crotal)").order("fecha", { ascending: false }).limit(200),
         supabase.from("alerta_sanitaria").select("*").order("fecha", { ascending: false }).limit(200),
+        supabase.from("chat_guardado").select("*").order("fecha", { ascending: false }).limit(50),
       ]);
 
       // Process lotes with counts
@@ -189,6 +197,7 @@ function useSupabaseData() {
         resumenes: resumenR.data || [],
         anotaciones: anotacionesR.data || [],
         alertasSanitarias: alertasSanR.data || [],
+        chatsGuardados: chatsR.data || [],
       });
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -448,10 +457,19 @@ function CabraHistorialModal({ crotal, data, onClose }) {
     </div>
   );
 }
-function ChatBox({ messages, input, setInput, onSend, examples, onExample, placeholder, height = 460 }) {
+function ChatBox({ messages, input, setInput, onSend, examples, onExample, placeholder, height = 460, onSave, pageName }) {
   const [expanded, setExpanded] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveName, setSaveName] = useState("");
   const msgsEnd = useRef(null);
   useEffect(() => { msgsEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const handleSave = async () => {
+    if (!saveName.trim() || messages.length <= 1) return;
+    if (onSave) await onSave(saveName, messages, pageName || "general");
+    setSaveName("");
+    setShowSaveDialog(false);
+  };
 
   const chatContent = (
     <div style={{ background: "#FFF", border: expanded ? "none" : "1px solid #EEF2F6", borderRadius: expanded ? 0 : 16, display: "flex", flexDirection: "column", height: expanded ? "100%" : height, boxShadow: expanded ? "none" : "0 1px 4px rgba(0,0,0,0.03)" }}>
@@ -460,10 +478,24 @@ function ChatBox({ messages, input, setInput, onSend, examples, onExample, place
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#059669", animation: "pulse 2s infinite" }} />
           <span style={{ fontSize: 13, fontWeight: 700, color: "#1E293B" }}>Asistente Peñas Cercadas</span>
         </div>
-        <button onClick={() => setExpanded(!expanded)} title={expanded ? "Reducir" : "Ampliar chat"} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "4px 10px", fontSize: 12, cursor: "pointer", color: "#64748B", fontWeight: 600 }}>
-          {expanded ? "✕ Cerrar" : "⛶ Ampliar"}
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setExpanded(!expanded)} title={expanded ? "Reducir" : "Ampliar chat"} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "4px 10px", fontSize: 12, cursor: "pointer", color: "#64748B", fontWeight: 600 }}>
+            {expanded ? "✕ Cerrar" : "⛶ Ampliar"}
+          </button>
+          {onSave && messages.length > 1 && (
+            <button onClick={() => setShowSaveDialog(!showSaveDialog)} title="Guardar chat" style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 8, padding: "4px 10px", fontSize: 12, cursor: "pointer", color: "#059669", fontWeight: 600 }}>
+              💾 Guardar
+            </button>
+          )}
+        </div>
       </div>
+      {showSaveDialog && (
+        <div style={{ padding: "10px 18px", borderBottom: "1px solid #F1F5F9", background: "#F0FDF4", display: "flex", gap: 8, alignItems: "center" }}>
+          <input value={saveName} onChange={e => setSaveName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSave()} placeholder="Nombre del chat..." style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "2px solid #BBF7D0", fontSize: 12, outline: "none", background: "#FFF", boxSizing: "border-box" }} autoFocus />
+          <button onClick={handleSave} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#059669", color: "#FFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Guardar</button>
+          <button onClick={() => setShowSaveDialog(false)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#FFF", color: "#94A3B8", fontSize: 12, cursor: "pointer" }}>×</button>
+        </div>
+      )}
       <div style={{ flex: 1, overflow: "auto", padding: expanded ? "20px 28px" : 16, display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m, i) => (
           <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: expanded ? "14px 20px" : "10px 15px", maxWidth: m.role === "user" ? "85%" : "95%", fontSize: expanded ? 14 : 13, color: "#334155", lineHeight: 1.5 }}>
@@ -945,7 +977,7 @@ const PRODUCTION_FORECAST = [
   { mes: "Feb 27", litros: 1300, cabrasO: 520, ingresoEst: 51090 },
 ];
 
-function RentabilidadPage({ data }) {
+function RentabilidadPage({ data, saveChat }) {
   const [finMsg, setFinMsg] = useState("");
   const [finMsgs, setFinMsgs] = useState([{ role: "assistant", text: "Soy el asistente financiero. Puedo registrar gastos e ingresos y hacer previsiones. Dime qué necesitas." }]);
   const [tab, setTab] = useState("general");
@@ -1064,7 +1096,7 @@ function RentabilidadPage({ data }) {
           </Card>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ChatBox messages={finMsgs} input={finMsg} setInput={setFinMsg} onSend={send} examples={examples} onExample={setFinMsg} placeholder="Registra gastos o pregunta..." height={520} />
+          <ChatBox messages={finMsgs} input={finMsg} setInput={setFinMsg} onSend={send} examples={examples} onExample={setFinMsg} placeholder="Registra gastos o pregunta..." height={520} onSave={saveChat} pageName="rentabilidad" />
           <Card style={{ background: "linear-gradient(135deg, #FEF9EE, #FFF7ED)", border: "1px solid #FDE68A" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", marginBottom: 10 }}>💡 Recomendaciones</div>
             {["El pienso supone el 56% de gastos. Un 5% de ahorro = 640€/mes", `Las ${dobleVacias.length} doble vacías generan 0€ con coste de mantenimiento`, `Jul 2026 será el pico: preparar capacidad de ordeño`].map((c, i) =>
@@ -1082,7 +1114,7 @@ function RentabilidadPage({ data }) {
 // ==========================================
 // IMPORTADOR & CONSULTAS & CONFIG
 // ==========================================
-function ImportadorPage({ data, refresh }) {
+function ImportadorPage({ data, refresh, saveChat }) {
   const [dO, setDO] = useState(false);
   const [m, setM] = useState("");
   const [ms, setMs] = useState([{ role: "assistant", text: "Sube un CSV del FLM o cualquier archivo de datos. Lo analizo y puedo importarlo a la base de datos. También puedes decirme cosas como 'Se ha muerto la cabra 057600' o 'Cambia la 056749 al Lote 4'." }]);
@@ -1551,16 +1583,18 @@ function ImportadorPage({ data, refresh }) {
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho o pregunta..." height={canImport ? 380 : 500} />
+        <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho o pregunta..." height={canImport ? 380 : 500} onSave={saveChat} pageName="importador" />
       </div>
     </div>
   );
 }
 
-function ConsultasPage({ data }) {
+function ConsultasPage({ data, saveChat }) {
   const [q, setQ] = useState("");
   const [ms, setMs] = useState([{ role: "assistant", text: "Pregúntame lo que quieras sobre tu granja. Tengo acceso a todos los datos: producción, partos, ecografías, tratamientos, cubriciones, crías, lotes. Puedo cruzar cualquier dato." }]);
   const [ld, setLd] = useState(false);
+  const [showSave, setShowSave] = useState(false);
+  const [chatName, setChatName] = useState("");
   
   // Build rich context with cross-referenced data
   const buildRichContext = (userMsg) => {
@@ -1881,10 +1915,24 @@ function ConsultasPage({ data }) {
   return (
     <div style={{ display: "flex", gap: 20, height: "calc(100vh - 155px)" }}>
       <div style={{ flex: 1, background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 16, display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "13px 20px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", gap: 9 }}>
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#059669", animation: "pulse 2s infinite" }} />
-          <span style={{ fontSize: 13, fontWeight: 700 }}>Asistente Peñas Cercadas</span>
+        <div style={{ padding: "13px 20px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#059669", animation: "pulse 2s infinite" }} />
+            <span style={{ fontSize: 13, fontWeight: 700 }}>Asistente Peñas Cercadas</span>
+          </div>
+          {ms.length > 1 && saveChat && (
+            <button onClick={() => setShowSave(!showSave)} style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 8, padding: "4px 10px", fontSize: 12, cursor: "pointer", color: "#059669", fontWeight: 600 }}>
+              💾 Guardar
+            </button>
+          )}
         </div>
+        {showSave && (
+          <div style={{ padding: "10px 20px", borderBottom: "1px solid #F1F5F9", background: "#F0FDF4", display: "flex", gap: 8, alignItems: "center" }}>
+            <input value={chatName} onChange={e => setChatName(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && chatName.trim()) { saveChat(chatName, ms, "consultas"); setChatName(""); setShowSave(false); } }} placeholder="Nombre del chat..." style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "2px solid #BBF7D0", fontSize: 12, outline: "none", background: "#FFF", boxSizing: "border-box" }} autoFocus />
+            <button onClick={() => { if (chatName.trim()) { saveChat(chatName, ms, "consultas"); setChatName(""); setShowSave(false); } }} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#059669", color: "#FFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Guardar</button>
+            <button onClick={() => setShowSave(false)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#FFF", color: "#94A3B8", fontSize: 12, cursor: "pointer" }}>×</button>
+          </div>
+        )}
         <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
           {ms.map((m, i) => (
             <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: m.role === "user" ? "80%" : "90%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
@@ -2331,7 +2379,7 @@ function ConfigPage({ data, refresh }) {
 // ==========================================
 // PRODUCCIÓN & ANÁLISIS — The Beast
 // ==========================================
-function ProduccionPage({ data }) {
+function ProduccionPage({ data, saveChat }) {
   const [prodMsg, setProdMsg] = useState("");
   const [prodMsgs, setProdMsgs] = useState([{ role: "assistant", text: "Soy el analista de producción de Peñas Cercadas. Puedo analizar rendimiento, detectar tendencias, comparar lotes, identificar las mejores y peores cabras, y recomendar decisiones. Pregúntame lo que quieras." }]);
   const [prodLd, setProdLd] = useState(false);
@@ -2879,6 +2927,7 @@ function ProduccionPage({ data }) {
             onExample={setProdMsg}
             placeholder="Analiza la producción..."
             height={healthAlerts.length > 0 ? 340 : 450}
+            onSave={saveChat} pageName="produccion"
           />
 
           {/* Quick insights */}
@@ -2908,7 +2957,7 @@ function ProduccionPage({ data }) {
 // ==========================================
 // SANIDAD — Centro de Control Sanitario
 // ==========================================
-function SanidadPage({ data, refresh }) {
+function SanidadPage({ data, refresh, saveChat }) {
   const [expandedCard, setExpandedCard] = useState(null);
   const [showAddNote, setShowAddNote] = useState(false);
   const [newNote, setNewNote] = useState({ cabra_crotal: "", texto: "", tipo: "individual" });
@@ -3315,6 +3364,7 @@ function SanidadPage({ data, refresh }) {
           onExample={setSanMsg}
           placeholder="Pregunta sobre sanidad..."
           height={350}
+          onSave={saveChat} pageName="sanidad"
         />
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <Card style={{ background: "linear-gradient(135deg, #FEF9EE, #FFF7ED)", border: "1px solid #FDE68A" }}>
@@ -3345,6 +3395,86 @@ function SanidadPage({ data, refresh }) {
 }
 
 // ==========================================
+// CHATS GUARDADOS
+// ==========================================
+function GuardadosPage({ data, refresh }) {
+  const [viewChat, setViewChat] = useState(null);
+  const chats = data.chatsGuardados || [];
+  const tipoColors = { consultas: "#E8950A", produccion: "#059669", sanidad: "#DC2626", rentabilidad: "#7C3AED", importador: "#0891B2", general: "#64748B" };
+  const tipoIcons = { consultas: "💬", produccion: "🥛", sanidad: "🏥", rentabilidad: "💰", importador: "📁", general: "📋" };
+
+  const deleteChat = async (id) => {
+    await supabase.from("chat_guardado").delete().eq("id", id);
+    refresh();
+  };
+
+  if (viewChat) {
+    const msgs = typeof viewChat.mensajes === "string" ? JSON.parse(viewChat.mensajes) : viewChat.mensajes;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={() => setViewChat(null)} style={{ padding: "8px 16px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 12, color: "#64748B", fontWeight: 600 }}>← Volver</button>
+            <span style={{ fontSize: 16, fontWeight: 700, color: "#1E293B" }}>{viewChat.nombre}</span>
+            <Badge text={viewChat.pagina} color={tipoColors[viewChat.pagina] || "#64748B"} />
+          </div>
+          <span style={{ fontSize: 12, color: "#94A3B8" }}>{new Date(viewChat.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+        <Card>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "calc(100vh - 250px)", overflow: "auto" }}>
+            {msgs.map((m, i) => (
+              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: m.role === "user" ? "80%" : "95%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
+                {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {chats.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 60 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>💾</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#1E293B", marginBottom: 8 }}>Sin chats guardados</div>
+          <div style={{ fontSize: 14, color: "#94A3B8" }}>Cuando tengas una conversación importante, pulsa "💾 Guardar" en cualquier chat para guardarla aquí.</div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
+          {chats.map((chat, i) => {
+            const msgs = typeof chat.mensajes === "string" ? JSON.parse(chat.mensajes) : chat.mensajes;
+            const lastMsg = msgs.filter(m => m.role === "assistant").pop();
+            const preview = lastMsg ? lastMsg.text.substring(0, 120).replace(/[#*]/g, "") + "..." : "";
+            return (
+              <div key={i} onClick={() => setViewChat(chat)}
+                style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 16, padding: "18px 22px", cursor: "pointer", transition: "all .2s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = `${tipoColors[chat.pagina]}50`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${tipoColors[chat.pagina]}10`; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 18 }}>{tipoIcons[chat.pagina] || "📋"}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#1E293B" }}>{chat.nombre}</span>
+                  </div>
+                  <button onClick={e => { e.stopPropagation(); deleteChat(chat.id); }} title="Eliminar" style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #FECACA", background: "#FEF2F2", cursor: "pointer", fontSize: 10, color: "#DC2626", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                </div>
+                <div style={{ fontSize: 11.5, color: "#64748B", lineHeight: 1.5, marginBottom: 10 }}>{preview}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <Badge text={chat.pagina} color={tipoColors[chat.pagina] || "#64748B"} />
+                  <span style={{ fontSize: 11, color: "#94A3B8" }}>{new Date(chat.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · {msgs.length} msgs</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
 // MAIN APP
 // ==========================================
 const NAV = [
@@ -3354,7 +3484,8 @@ const NAV = [
   { id: "rentabilidad", icon: "💰", label: "Rentabilidad" },
   { id: "importador", icon: "📁", label: "Importador" },
   { id: "consultas", icon: "💬", label: "Consultas" },
-  { id: "config", icon: "⚙️", label: "Configuración" },
+  { id: "guardados", icon: "💾", label: "Guardados" },
+  { id: "config", icon: "⚙️", label: "Config" },
 ];
 
 export default function App() {
@@ -3381,6 +3512,11 @@ export default function App() {
   if (loading || !data) return <LoadingScreen />;
 
   const handleLogout = async () => { await supabase.auth.signOut(); setUser(null); };
+
+  const saveChat = async (nombre, mensajes, pagina) => {
+    await supabase.from("chat_guardado").insert([{ nombre, pagina, mensajes: JSON.stringify(mensajes) }]);
+    refresh();
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: "#F5F7FA", fontFamily: "'Outfit', sans-serif" }}>
@@ -3431,7 +3567,7 @@ export default function App() {
       <div style={{ padding: "22px 28px", maxWidth: 1360, margin: "0 auto" }}>
         <div style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 23, fontWeight: 800, color: "#1E293B", letterSpacing: "-.02em" }}>
-            {{ dashboard: "Dashboard", produccion: "Producción & Análisis", sanidad: "Centro de Control Sanitario", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", config: "Configuración" }[page]}
+            {{ dashboard: "Dashboard", produccion: "Producción & Análisis", sanidad: "Centro de Control Sanitario", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", guardados: "Chats Guardados", config: "Configuración" }[page]}
           </div>
           <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 3 }}>
             {{ dashboard: `Datos en vivo de Supabase · ${data.cabras.length} cabras · ${data.parideras.length} parideras`,
@@ -3440,15 +3576,17 @@ export default function App() {
               rentabilidad: "Análisis financiero · Previsión de producción · Control de ingresos y gastos",
               importador: "Sube CSV del FLM y se importa automáticamente a Supabase",
               consultas: "Pregunta lo que quieras — respuestas con datos reales",
+              guardados: `${(data.chatsGuardados || []).length} conversaciones guardadas`,
               config: `${data.reglas.length} reglas · ${data.protocolos.length} protocolos veterinarios` }[page]}
           </div>
         </div>
         {page === "dashboard" && <DashboardPage data={data} />}
-        {page === "produccion" && <ProduccionPage data={data} />}
-        {page === "sanidad" && <SanidadPage data={data} refresh={refresh} />}
-        {page === "rentabilidad" && <RentabilidadPage data={data} />}
-        {page === "importador" && <ImportadorPage data={data} refresh={refresh} />}
-        {page === "consultas" && <ConsultasPage data={data} />}
+        <div style={{ display: page === "produccion" ? "block" : "none" }}><ProduccionPage data={data} saveChat={saveChat} /></div>
+        <div style={{ display: page === "sanidad" ? "block" : "none" }}><SanidadPage data={data} refresh={refresh} saveChat={saveChat} /></div>
+        <div style={{ display: page === "rentabilidad" ? "block" : "none" }}><RentabilidadPage data={data} saveChat={saveChat} /></div>
+        <div style={{ display: page === "importador" ? "block" : "none" }}><ImportadorPage data={data} refresh={refresh} saveChat={saveChat} /></div>
+        <div style={{ display: page === "consultas" ? "block" : "none" }}><ConsultasPage data={data} saveChat={saveChat} /></div>
+        <div style={{ display: page === "guardados" ? "block" : "none" }}><GuardadosPage data={data} refresh={refresh} /></div>
         {page === "config" && <ConfigPage data={data} refresh={refresh} />}
       </div>
     </div>

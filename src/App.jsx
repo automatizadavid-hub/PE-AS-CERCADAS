@@ -1732,8 +1732,10 @@ function ConsultasPage({ data, saveChat }) {
       });
     }
     
-    // Include production data when relevant
-    if (msg.includes("produc") || msg.includes("leche") || msg.includes("litro") || msg.includes("mejor") || msg.includes("peor") || msg.includes("rendimiento") || msg.includes("descart") || msg.includes("matadero") || msg.includes("conductiv") || msg.includes("mastitis") || msg.includes("sanid") || msg.includes("alerta") || msg.includes("flujo") || msg.includes("ordeñ")) {
+    // Include production data when relevant — BUT NOT when asking about cubrición (that has its own filtered section)
+    const isCubricionQuery = msg.includes("cubri") || msg.includes("macho") || msg.includes("implant") || msg.includes("insemin") || msg.includes("reproduc") || msg.includes("fertilid") || msg.includes("celo") || (msg.includes("mejor") && (msg.includes("insemin") || msg.includes("macho") || msg.includes("cubri"))) || (msg.includes("parid") && (msg.includes("prep") || msg.includes("octubre") || msg.includes("enero") || msg.includes("mayo")));
+    
+    if (!isCubricionQuery && (msg.includes("produc") || msg.includes("leche") || msg.includes("litro") || msg.includes("mejor") || msg.includes("peor") || msg.includes("rendimiento") || msg.includes("descart") || msg.includes("matadero") || msg.includes("conductiv") || msg.includes("mastitis") || msg.includes("sanid") || msg.includes("alerta") || msg.includes("flujo") || msg.includes("ordeñ"))) {
       const sorted = [...todayProd].sort((a, b) => (b.litros || 0) - (a.litros || 0));
       if (sorted.length > 0) {
         ctx += `\n\nPRODUCCIÓN DEL DÍA ${latestDate} (${sorted.length} cabras, ${sorted.reduce((s, p) => s + (p.litros || 0), 0).toFixed(1)}L total):`;
@@ -1796,68 +1798,240 @@ function ConsultasPage({ data, saveChat }) {
       });
     }
     
-    // CUBRICIÓN / REPRODUCCIÓN — Full data for Lote 1, 4, and vacías del 6
-    if (msg.includes("cubri") || msg.includes("macho") || msg.includes("implant") || msg.includes("insemin") || msg.includes("parid") && (msg.includes("prep") || msg.includes("octubre") || msg.includes("enero") || msg.includes("mayo")) || msg.includes("reproduc") || msg.includes("fertilid") || msg.includes("celo")) {
-      ctx += `\n\n${'='.repeat(50)}\nDATOS PARA ANÁLISIS DE CUBRICIÓN\n${'='.repeat(50)}`;
+    // CUBRICIÓN / REPRODUCCIÓN — PRE-FILTERED with PROJECTED DEL
+    if (isCubricionQuery) {
+      // =============================================
+      // STEP 1: Determine target paridera and days until machos enter
+      // =============================================
+      // Macho entry dates: 20 feb / 15 may / 15 ago / 15 nov
+      const hoy = new Date();
+      const machoSchedule = [
+        { mes: 1, dia: 20, paridera: "Julio" },     // Feb 20 → partos julio
+        { mes: 4, dia: 15, paridera: "Octubre" },    // May 15 → partos octubre
+        { mes: 7, dia: 15, paridera: "Enero" },      // Aug 15 → partos enero
+        { mes: 10, dia: 15, paridera: "Noviembre" },  // Nov 15 → partos abril/mayo
+      ];
+
+      // Detect which paridera user is asking about, or default to next
+      let targetMachoDate = null;
+      let targetParidera = "";
       
-      // Estado de cada lote
+      if (msg.includes("octubre")) {
+        targetMachoDate = new Date(hoy.getFullYear(), 4, 15); // May 15
+        if (targetMachoDate < hoy) targetMachoDate.setFullYear(targetMachoDate.getFullYear() + 1);
+        targetParidera = "Octubre";
+      } else if (msg.includes("enero") || msg.includes("febrero")) {
+        targetMachoDate = new Date(hoy.getFullYear(), 7, 15); // Aug 15
+        if (targetMachoDate < hoy) targetMachoDate.setFullYear(targetMachoDate.getFullYear() + 1);
+        targetParidera = "Enero/Febrero";
+      } else if (msg.includes("mayo") || msg.includes("abril")) {
+        targetMachoDate = new Date(hoy.getFullYear(), 10, 15); // Nov 15
+        if (targetMachoDate < hoy) targetMachoDate.setFullYear(targetMachoDate.getFullYear() + 1);
+        targetParidera = "Abril/Mayo";
+      } else if (msg.includes("julio") || msg.includes("agosto")) {
+        targetMachoDate = new Date(hoy.getFullYear(), 1, 20); // Feb 20
+        if (targetMachoDate < hoy) targetMachoDate.setFullYear(targetMachoDate.getFullYear() + 1);
+        targetParidera = "Julio/Agosto";
+      } else {
+        // Default: find next macho entry
+        let minDays = 999;
+        for (const ms2 of machoSchedule) {
+          let d = new Date(hoy.getFullYear(), ms2.mes, ms2.dia);
+          if (d < hoy) d.setFullYear(d.getFullYear() + 1);
+          const days = Math.round((d - hoy) / 86400000);
+          if (days < minDays) { minDays = days; targetMachoDate = d; targetParidera = ms2.paridera; }
+        }
+      }
+
+      const diasHastaMachos = Math.round((targetMachoDate - hoy) / 86400000);
+      const fechaImplantes = new Date(targetMachoDate.getTime() - 45 * 86400000);
+      const fechaInseminacion = new Date(targetMachoDate.getTime() - 15 * 86400000);
+
+      ctx += `\n\n${'='.repeat(60)}`;
+      ctx += `\n🔒 ANÁLISIS CUBRICIÓN — PARIDERA ${targetParidera.toUpperCase()}`;
+      ctx += `\n${'='.repeat(60)}`;
+      ctx += `\n📅 Machos entran: ${targetMachoDate.toLocaleDateString("es-ES")} (en ${diasHastaMachos} días)`;
+      ctx += `\n📅 Implantes: ~${fechaImplantes.toLocaleDateString("es-ES")}`;
+      ctx += `\n📅 Inseminación: ~${fechaInseminacion.toLocaleDateString("es-ES")}`;
+      ctx += `\n\n⚠️ TODOS los DEL mostrados son PROYECTADOS al momento de entrar con machos (DEL actual + ${diasHastaMachos} días)`;
+      ctx += `\n⛔ PROHIBIDO recomendar cabras que no estén en la lista de APTAS`;
+
+      // =============================================
+      // STEP 2: Filter by lote (ONLY Lote 1, 4, vacías L6)
+      // =============================================
       ctx += `\n\nESTADO DE LOTES:`;
       data.lotes.filter(l => l.cabras > 0).forEach(l => {
-        ctx += `\n  ${l.nombre} [${l.estado || 'produccion'}]: ${l.cabras} cabras`;
+        const esApto = l.nombre.includes("Lote 1") || l.nombre.includes("Lote 4");
+        ctx += `\n  ${l.nombre}: ${l.cabras} cabras ${esApto ? '✅ APTO' : '⛔ BLOQUEADO'}`;
       });
 
-      // Ecografías vacías recientes (candidatas del Lote 6)
-      const vaciasByC2 = {};
-      data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
-        const cr = e.cabra?.crotal;
-        if (cr) { if (!vaciasByC2[cr]) vaciasByC2[cr] = []; vaciasByC2[cr].push(e); }
-      });
-
-      // ALL cabras from Lote 1 and 4 with full data
       const candidateLotes = data.lotes.filter(l => l.nombre.includes("Lote 1") || l.nombre.includes("Lote 4"));
       const candidateLoteIds = new Set(candidateLotes.map(l => l.id));
+
+      // =============================================
+      // STEP 3: Analyze each cabra with PROJECTED DEL
+      // =============================================
+      const allCandidates = [];
       
-      ctx += `\n\n📋 CABRAS LOTE 1 Y LOTE 4 — CANDIDATAS A CUBRICIÓN:`;
-      ctx += `\n(Formato: Crotal, Litros/día, DEL, Lactación, Conductividad, Lote, Ecografías, Anotaciones)`;
-      
-      const candidateCabras = data.cabras.filter(c => candidateLoteIds.has(c.lote_id));
-      candidateCabras.forEach(c => {
+      data.cabras.filter(c => candidateLoteIds.has(c.lote_id)).forEach(c => {
         const p = prodByCabraId[c.id];
+        const delHoy = p?.dia_lactacion || c.dias_en_leche || 0;
+        const delProyectado = delHoy + diasHastaMachos;
+        const litros = p?.litros || 0;
+        const litrosTotalesLact = p?.litros_totales_lactacion || 0;
+        const promedioTotal = p?.promedio_total || p?.media_total || 0;
+        const prom10d = p?.promedio_10d || p?.media_10d || 0;
+        const cond = p?.conductividad || 0;
+        const lact = c.num_lactaciones || p?.lactacion_num || 0;
         const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
         const lastEco = ecos.length > 0 ? ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0] : null;
         const vaciaCount = ecos.filter(e => e.resultado === 'vacia').length;
         const anots = (data.anotaciones || []).filter(a => a.cabra_id === c.id);
-        const partos = data.partos.filter(pp => pp.cabra?.crotal === c.crotal);
-        const abortos = partos.filter(pp => pp.tipo === 'aborto').length;
-        
-        ctx += `\n  ${c.crotal}: ${p ? p.litros + 'L' : 'sin prod'}, DEL=${p?.dia_lactacion || c.dias_en_leche || '?'}, L${c.num_lactaciones || '?'}, Cond=${p?.conductividad || '?'}, ${c.lote?.nombre || '?'}`;
-        if (lastEco) ctx += `, ÚltimaEco=${lastEco.fecha}:${lastEco.resultado}`;
-        if (vaciaCount >= 2) ctx += `, 🔴DOBLE_VACÍA(${vaciaCount}x)`;
-        if (abortos > 0) ctx += `, ⚠️ABORTO(${abortos}x)`;
-        if (anots.length > 0) ctx += `, 📋${anots.length}notas`;
+        const partosC = data.partos.filter(pp => pp.cabra?.crotal === c.crotal);
+        const abortosC = partosC.filter(pp => pp.tipo === 'aborto').length;
+
+        // Skip gestantes confirmadas
+        if (lastEco && (lastEco.resultado === 'gestante' || lastEco.resultado === 'prenada')) return;
+
+        // =============================================
+        // LÓGICA DE APTITUD — basada en DEL PROYECTADO
+        // =============================================
+        let aptitud = "";
+        let razon = "";
+        const esBuenaProductora = litros >= 2.5;
+        const esMediaProductora = litros >= 1.5 && litros < 2.5;
+        const esMalaProductora = litros < 1.5;
+
+        if (delProyectado < 130) {
+          // Demasiado pronto — esta cabra acaba de empezar lactación
+          aptitud = "NO_APTA";
+          razon = `DEL proyectado ${delProyectado} (<130). Demasiado pronto. Hoy=${delHoy}, produce ${litros.toFixed(1)}L. Debe seguir ordeñándose.`;
+        } else if (delProyectado >= 130 && delProyectado < 150) {
+          if (esMalaProductora) {
+            // Mala productora con poco tiempo — adelantar porque si no se seca
+            aptitud = "ADELANTAR";
+            razon = `DEL proy.=${delProyectado}, prod baja ${litros.toFixed(1)}L. Si la dejamos para la siguiente paridera será no rentable. Adelantar cubrición.`;
+          } else {
+            // Buena o media productora — esperar, está produciendo bien
+            aptitud = "NO_APTA";
+            razon = `DEL proy.=${delProyectado} (<150) pero produce ${litros.toFixed(1)}L. Aún es rentable, esperar a siguiente paridera.`;
+          }
+        } else if (delProyectado >= 150 && delProyectado <= 220) {
+          // FRANJA NORMAL de cubrición
+          if (esBuenaProductora && delProyectado < 180) {
+            // Buena productora pero aún tiene margen — podría estirarse
+            aptitud = "APTA";
+            razon = `DEL proy.=${delProyectado}, buena prod ${litros.toFixed(1)}L. En franja válida. Idealmente estirar a 200+ pero entra si hace falta.`;
+          } else if (esBuenaProductora && delProyectado >= 180) {
+            // Buena productora en zona ideal
+            aptitud = "IDEAL";
+            razon = `DEL proy.=${delProyectado}, ${litros.toFixed(1)}L. Zona ideal para buena productora.`;
+          } else if (esMediaProductora) {
+            aptitud = "APTA";
+            razon = `DEL proy.=${delProyectado}, prod media ${litros.toFixed(1)}L. Franja normal.`;
+          } else {
+            // Mala productora en franja — debe entrar sí o sí
+            aptitud = "APTA";
+            razon = `DEL proy.=${delProyectado}, prod baja ${litros.toFixed(1)}L. Debe entrar a cubrición.`;
+          }
+        } else if (delProyectado > 220) {
+          // Pasada de días — urgente
+          aptitud = "URGENTE";
+          razon = `DEL proy.=${delProyectado} (>220). URGENTE. Ya debería haberse cubierto. Riesgo de secarse sin preñar.`;
+        }
+
+        // Flags adicionales
+        const flags = [];
+        if (vaciaCount >= 2) flags.push(`🔴 DOBLE VACÍA (${vaciaCount}x)`);
+        if (abortosC > 0) flags.push(`⚠️ ${abortosC} aborto(s)`);
+        if (cond > 6.5) flags.push(`🔴 Cond MUY alta ${cond.toFixed(2)} — NO inseminar`);
+        else if (cond > 6.0) flags.push(`⚠️ Cond alta ${cond.toFixed(2)}`);
+        if (anots.length > 0) flags.push(`📋 ${anots.length} anotación(es) vet`);
+
+        allCandidates.push({ crotal: c.crotal, litros, litrosTotalesLact, promedioTotal, prom10d, delHoy, delProyectado, lact, cond, lote: c.lote?.nombre || '?', aptitud, razon, flags, vaciaCount, abortosC });
       });
 
       // Vacías del Lote 6
-      const lote6 = data.lotes.find(l => l.nombre.includes("Lote 6"));
-      if (lote6) {
-        const lote6Cabras = data.cabras.filter(c => c.lote_id === lote6.id);
-        const vaciasL6 = lote6Cabras.filter(c => {
+      const lote6c = data.lotes.find(l => l.nombre && l.nombre.includes("Lote 6"));
+      if (lote6c) {
+        data.cabras.filter(c => c.lote_id === lote6c.id).forEach(c => {
           const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+          if (ecos.length === 0) return;
           const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
-          return lastEco && lastEco.resultado === 'vacia';
-        });
-        if (vaciasL6.length > 0) {
-          ctx += `\n\n⚠️ VACÍAS DEL LOTE 6 (deben entrar a cubrición):`;
-          vaciasL6.forEach(c => {
-            const p = prodByCabraId[c.id];
-            ctx += `\n  ${c.crotal}: ${p ? p.litros + 'L' : 'sin prod'}, DEL=${p?.dia_lactacion || c.dias_en_leche || '?'}, L${c.num_lactaciones || '?'}`;
+          if (lastEco.resultado !== 'vacia') return;
+          const p = prodByCabraId[c.id];
+          const delHoy = p?.dia_lactacion || c.dias_en_leche || 0;
+          const delProyectado = delHoy + diasHastaMachos;
+          allCandidates.push({
+            crotal: c.crotal, litros: p?.litros || 0, litrosTotalesLact: p?.litros_totales_lactacion || 0,
+            promedioTotal: p?.promedio_total || p?.media_total || 0, prom10d: p?.promedio_10d || p?.media_10d || 0,
+            delHoy, delProyectado,
+            lact: c.num_lactaciones || 0, cond: p?.conductividad || 0,
+            lote: "Lote 6 (VACÍA)", aptitud: delProyectado >= 130 ? "APTA" : "NO_APTA",
+            razon: `Vacía en eco ${lastEco.fecha}, debe entrar a cubrición. DEL proy.=${delProyectado}`,
+            flags: [`⚠️ Vacía eco ${lastEco.fecha}`], vaciaCount: 1, abortosC: 0
           });
-        }
+        });
       }
 
-      ctx += `\n\nRECORDATORIO: Solo Lote 1 y 4 + vacías Lote 6 pueden entrar. Lote 3/5/13/2/6(gestantes) = PROHIBIDO.`;
-      ctx += `\nFranja normal: 150-220 DEL al momento de ENTRAR CON MACHOS. Buenas prod → estirar a 210. Malas → adelantar.`;
-      ctx += `\nInseminación = 30 mejores por genética+producción+salud. Resto = monta natural.`;
+      // =============================================
+      // STEP 4: Output results — separated by aptitude
+      // =============================================
+      const aptas = allCandidates.filter(c => c.aptitud === "IDEAL" || c.aptitud === "APTA" || c.aptitud === "URGENTE" || c.aptitud === "ADELANTAR");
+      const noAptas = allCandidates.filter(c => c.aptitud === "NO_APTA");
+      const urgentes = aptas.filter(c => c.aptitud === "URGENTE");
+      const ideales = aptas.filter(c => c.aptitud === "IDEAL");
+
+      if (urgentes.length > 0) {
+        ctx += `\n\n🚨 URGENTES — Cubrición inmediata (${urgentes.length}):`;
+        urgentes.sort((a, b) => b.delProyectado - a.delProyectado).forEach(c => {
+          ctx += `\n  ${c.crotal}: ${c.litros.toFixed(2)}L/día, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}→${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote}`;
+          ctx += `\n    → ${c.razon} ${c.flags.join(' ')}`;
+        });
+      }
+
+      ctx += `\n\n✅ APTAS PARA CUBRICIÓN (${aptas.length} total):`;
+      ctx += `\n(Objetivo: meter al máximo número de cabras posible que cumplan requisitos)`;
+      aptas.sort((a, b) => b.litros - a.litros).forEach(c => {
+        ctx += `\n  ${c.crotal}: ${c.litros.toFixed(2)}L/día, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}→${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote} [${c.aptitud}]`;
+        ctx += `\n    → ${c.razon} ${c.flags.length > 0 ? c.flags.join(' ') : ''}`;
+      });
+
+      ctx += `\n\n⛔ NO APTAS (${noAptas.length}) — PROHIBIDO recomendar:`;
+      noAptas.forEach(c => {
+        ctx += `\n  ${c.crotal}: ${c.litros.toFixed(2)}L/día, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}→${c.delProyectado}, ${c.lote} — ${c.razon}`;
+      });
+
+      // =============================================
+      // STEP 5: Top 30 for insemination — SELECCIÓN GENÉTICA
+      // Litros totales de lactación es el factor MÁS IMPORTANTE:
+      // mide el rendimiento acumulado real, no solo el pico de un día
+      // =============================================
+      ctx += `\n\n🏆 TOP 30 PARA INSEMINACIÓN ARTIFICIAL — SELECCIÓN GENÉTICA:`;
+      ctx += `\nOrden de prioridad: 1º LitrosTotalesLactación (rendimiento acumulado) → 2º Producción diaria → 3º Menos lactaciones (más joven)`;
+      ctx += `\nFiltros: sin doble vacía, sin abortos, conductividad <6.5`;
+      const insemCandidates = aptas
+        .filter(c => c.vaciaCount < 2 && c.abortosC === 0 && c.cond < 6.5)
+        .sort((a, b) => {
+          // Primary: litros totales lactación — rendimiento acumulado real = mejor genética
+          if (a.litrosTotalesLact > 0 || b.litrosTotalesLact > 0) {
+            if (Math.abs(b.litrosTotalesLact - a.litrosTotalesLact) > 10) return b.litrosTotalesLact - a.litrosTotalesLact;
+          }
+          // Secondary: producción diaria actual
+          if (Math.abs(b.litros - a.litros) > 0.3) return b.litros - a.litros;
+          // Tertiary: menos lactaciones = más joven = mejor inversión genética
+          return a.lact - b.lact;
+        });
+      
+      ctx += `\nCandidatas limpias para IA: ${insemCandidates.length}`;
+      insemCandidates.slice(0, 35).forEach((c, i) => {
+        ctx += `\n  ${i + 1}. ${c.crotal}: LitTotLact=${c.litrosTotalesLact.toFixed(0)}, ${c.litros.toFixed(2)}L/día, DEL ${c.delHoy}→${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote}`;
+      });
+
+      ctx += `\n\n⛔⛔⛔ REGLA ABSOLUTA: SOLO recomendar cabras de la lista de APTAS.`;
+      ctx += `\nLas NO APTAS tienen DEL proyectado demasiado bajo o producen demasiado bien para cortarles la lactación.`;
+      ctx += `\nSi una cabra da 4L y tiene DEL proyectado <130 → NO SE TOCA. Está en plena producción.`;
+      ctx += `\nPara inseminación, LitrosTotalesLactación manda. Un día bueno no dice nada, el acumulado sí. ⛔⛔⛔`;
     }
     
     // Include lote details when relevant

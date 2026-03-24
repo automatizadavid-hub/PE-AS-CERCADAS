@@ -350,20 +350,22 @@ function CabraHistorialModal({ crotal, data, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn .2s" }} onClick={onClose}>
-      <div style={{ background: "#FFF", borderRadius: 20, width: "90%", maxWidth: 800, maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.15)", animation: "slideUp .3s" }} onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ padding: "22px 28px", borderBottom: "1px solid #F1F5F9", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "#FFF", zIndex: 2 }}>
+      <div style={{ background: "#FFF", borderRadius: 20, width: "90%", maxWidth: 800, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.15)", animation: "slideUp .3s" }} onClick={e => e.stopPropagation()}>
+        {/* Header — always visible */}
+        <div style={{ padding: "22px 28px", borderBottom: "1px solid #F1F5F9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, background: "#FFF", borderRadius: "20px 20px 0 0" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 800, color: "#1E293B", fontFamily: "'Space Mono', monospace" }}>{crotal}</div>
             <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 2 }}>
               {cabra.lote?.nombre || "Sin lote"} · {cabra.estado} · {cabra.raza || "M-Granadina"}
               {edad !== null && ` · ${edad} años`}
+              {cabra.riia && ` · RIIA: ${cabra.riia}`}
             </div>
           </div>
           <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: 10, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 18, color: "#94A3B8", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
         </div>
 
-        <div style={{ padding: "20px 28px" }}>
+        {/* Scrollable content */}
+        <div style={{ flex: 1, overflow: "auto", padding: "20px 28px" }}>
           {/* Alerts */}
           {alerts.length > 0 && (
             <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: 14, marginBottom: 18 }}>
@@ -586,7 +588,11 @@ function LoadingScreen() {
 function DashboardPage({ data }) {
   const [modal, setModal] = useState(null);
   const [cabraHistorial, setCabraHistorial] = useState(null);
+  const [searchCrotal, setSearchCrotal] = useState("");
   const LOTE_COLORS = { "Lote 1": "#E8950A", "Lote 2": "#DB2777", "Lote 3": "#7C3AED", "Lote 4": "#DC2626", "Lote 5": "#0891B2", "Lote 6": "#EA580C", "Lote 13": "#059669" };
+
+  // Search suggestions
+  const searchResults = searchCrotal.length >= 3 ? data.cabras.filter(c => c.crotal.includes(searchCrotal)).slice(0, 8) : [];
 
   const lotesSorted = [...data.lotes].filter(l => l.cabras > 0).sort((a, b) => b.cabras - a.cabras);
   const totalCabras = data.cabras.length;
@@ -725,6 +731,40 @@ function DashboardPage({ data }) {
         <KPI icon="💉" label="Tratamientos" value={data.tratamientos.length} sub="registrados" accent="#0891B2" onClick={() => setModal("trat")} />
         <KPI icon="🐣" label="Crías" value={data.crias.length} sub="hembras con peseta" accent="#DB2777" onClick={() => setModal("crias")} />
         <KPI icon="🔗" label="Cubriciones" value={data.cubriciones.length} sub={`${data.parideras.length} parideras`} accent="#EA580C" onClick={() => setModal("cubs")} />
+      </div>
+
+      {/* Quick goat search */}
+      <div style={{ position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ position: "relative", flex: 1, maxWidth: 400 }}>
+            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16 }}>🔍</span>
+            <input value={searchCrotal} onChange={e => setSearchCrotal(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && searchResults.length > 0) { setCabraHistorial(searchResults[0].crotal); setSearchCrotal(""); } }}
+              placeholder="Buscar cabra por crotal..."
+              style={{ width: "100%", padding: "12px 16px 12px 42px", borderRadius: 12, border: "2px solid #E2E8F0", fontSize: 14, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box", fontFamily: "'Space Mono', monospace" }}
+              onFocus={e => e.target.style.borderColor = "#E8950A"} onBlur={e => { setTimeout(() => setSearchCrotal(""), 200); e.target.style.borderColor = "#E2E8F0"; }} />
+          </div>
+          <div style={{ fontSize: 12, color: "#94A3B8" }}>Escribe mínimo 3 dígitos del crotal</div>
+        </div>
+        {searchResults.length > 0 && (
+          <div style={{ position: "absolute", top: "100%", left: 0, width: 400, marginTop: 4, background: "#FFF", border: "1px solid #E2E8F0", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 50, overflow: "hidden" }}>
+            {searchResults.map((c, i) => (
+              <div key={i} onClick={() => { setCabraHistorial(c.crotal); setSearchCrotal(""); }}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", cursor: "pointer", borderBottom: "1px solid #F5F7FA" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#FEF9EE"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div>
+                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#1E293B" }}>{c.crotal}</span>
+                  <span style={{ fontSize: 11, color: "#94A3B8", marginLeft: 8 }}>{c.lote?.nombre || "Sin lote"}</span>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Badge text={c.estado || "-"} color={c.estado === "lactacion" ? "#059669" : "#94A3B8"} />
+                  {c.num_lactaciones && <span style={{ fontSize: 11, color: "#64748B" }}>L{c.num_lactaciones}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>

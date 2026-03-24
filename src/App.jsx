@@ -32,13 +32,17 @@ function buildDataContext(data) {
   const lines = [];
   lines.push(`Total cabras: ${data.cabras.length}`);
   
-  // Lotes with counts
+  // Lotes with counts AND estado
   const loteCounts = {};
   data.cabras.forEach(c => {
     const lote = data.lotes.find(l => l.id === c.lote_id);
     if (lote) loteCounts[lote.nombre] = (loteCounts[lote.nombre] || 0) + 1;
   });
   lines.push("Lotes: " + Object.entries(loteCounts).map(([n, c]) => `${n}: ${c}`).join(", "));
+  
+  // Lote estados
+  const loteEstados = data.lotes.filter(l => l.estado && l.estado !== 'produccion').map(l => `${l.nombre}: ${l.estado}`);
+  if (loteEstados.length > 0) lines.push(`Lotes NO en producción: ${loteEstados.join(", ")}`);
   
   lines.push(`Partos registrados: ${data.partos.length}`);
   lines.push(`Ecografías: ${data.ecografias.length}`);
@@ -48,13 +52,16 @@ function buildDataContext(data) {
   lines.push(`Parideras: ${data.parideras.map(p => p.nombre).join(", ")}`);
   lines.push(`Reglas activas: ${data.reglas.length}`);
   
-  // Production data
-  if (data.resumenes && data.resumenes.length > 0) {
-    const last = data.resumenes[0];
-    lines.push(`\nÚltimo informe producción: ${last.fecha}`);
-    lines.push(`Litros totales ese día: ${last.litros_totales}`);
-    lines.push(`Media por cabra: ${last.media_litros} L`);
-    lines.push(`Cabras con conductividad alta: ${last.cabras_alta_conductividad || 0}`);
+  // Production data — multi-day summary
+  const prod = data.produccion || [];
+  const allDates = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
+  if (allDates.length > 0) {
+    lines.push(`\nDías de producción importados: ${allDates.length} (${allDates[allDates.length - 1]} a ${allDates[0]})`);
+    allDates.slice(0, 5).forEach(fecha => {
+      const dayProd = prod.filter(p => p.fecha === fecha);
+      const totalL = dayProd.reduce((s, p) => s + (p.litros || 0), 0);
+      lines.push(`  ${fecha}: ${dayProd.length} cabras, ${totalL.toFixed(1)}L total, ${(totalL / dayProd.length).toFixed(2)}L/cabra`);
+    });
   }
   
   // Double vacías
@@ -65,6 +72,24 @@ function buildDataContext(data) {
   });
   const dobleVacias = Object.entries(vaciasByC).filter(([, c]) => c >= 2).map(([cr]) => cr);
   if (dobleVacias.length > 0) lines.push(`Cabras vacías en 2+ ecografías: ${dobleVacias.join(", ")}`);
+  
+  // Anotaciones veterinarias recientes
+  const anotaciones = data.anotaciones || [];
+  if (anotaciones.length > 0) {
+    lines.push(`\nAnotaciones veterinarias: ${anotaciones.length} total`);
+    anotaciones.slice(0, 5).forEach(a => {
+      lines.push(`  [${a.fecha}] ${a.cabra?.crotal || "General"}: ${a.texto.substring(0, 80)}`);
+    });
+  }
+  
+  // Alertas sanitarias activas
+  const alertasActivas = (data.alertasSanitarias || []).filter(a => a.estado === "activa");
+  if (alertasActivas.length > 0) {
+    lines.push(`\n⚠️ Alertas sanitarias activas: ${alertasActivas.length}`);
+    alertasActivas.forEach(a => {
+      lines.push(`  ${a.fecha}: ${a.titulo} (${a.severidad})`);
+    });
+  }
   
   return lines.join("\n");
 }
@@ -203,7 +228,7 @@ function KPI({ icon, label, value, sub, accent, onClick }) {
     </div>
   );
 }
-function DataModal({ title, icon, accent, data, columns, onClose, searchPH, folders }) {
+function DataModal({ title, icon, accent, data, columns, onClose, searchPH, folders, onRowClick }) {
   const [s, setS] = useState("");
   const [activeFolder, setActiveFolder] = useState(folders ? null : "__all__");
   
@@ -225,7 +250,7 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
                   <span style={{ fontSize: 13, color: "#94A3B8" }}>› {activeFolder}</span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "#94A3B8" }}>{activeFolder ? `${f.length} registros` : `${folders.length} carpetas`}</div>
+              <div style={{ fontSize: 12, color: "#94A3B8" }}>{activeFolder ? `${f.length} registros${onRowClick ? " · Haz clic en una fila para ver historial" : ""}` : `${folders.length} carpetas`}</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -276,7 +301,7 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
           <div style={{ flex: 1, overflow: "auto", padding: "0 26px 18px" }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 3px", marginTop: 6 }}>
               <thead><tr>{columns.map((c, i) => <th key={i} style={{ textAlign: "left", padding: "9px 13px", fontSize: 10.5, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: ".06em", position: "sticky", top: 0, background: "#FFF" }}>{c.label}</th>)}</tr></thead>
-              <tbody>{f.slice(0, 300).map((r, i) => <tr key={i} onMouseEnter={e => e.currentTarget.style.background = "#F8FAFC"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <tbody>{f.slice(0, 300).map((r, i) => <tr key={i} onClick={() => onRowClick && onRowClick(r)} style={{ cursor: onRowClick ? "pointer" : "default" }} onMouseEnter={e => e.currentTarget.style.background = onRowClick ? "#FEF9EE" : "#F8FAFC"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 {columns.map((c, j) => <td key={j} style={{ padding: "10px 13px", fontSize: 13, color: "#334155", fontFamily: c.mono ? "'Space Mono', monospace" : "'Outfit', sans-serif", fontWeight: c.bold ? 700 : 400, borderBottom: "1px solid #F5F7FA" }}>{c.render ? c.render(r[c.key], r) : (r[c.key] ?? "-")}</td>)}
               </tr>)}</tbody>
             </table>
@@ -287,31 +312,186 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
     </div>
   );
 }
-function ChatBox({ messages, input, setInput, onSend, examples, onExample, placeholder, height = 460 }) {
+
+// ==========================================
+// CABRA HISTORIAL MODAL — Full life history
+// ==========================================
+function CabraHistorialModal({ crotal, data, onClose }) {
+  const cabra = data.cabras.find(c => c.crotal === crotal);
+  if (!cabra) return null;
+
+  const prod = (data.produccion || []).filter(p => p.cabra_id === cabra.id).sort((a, b) => b.fecha.localeCompare(a.fecha));
+  const partos = data.partos.filter(p => p.cabra?.crotal === crotal);
+  const ecos = data.ecografias.filter(e => e.cabra?.crotal === crotal);
+  const trats = data.tratamientos.filter(t => t.cabra?.crotal === crotal);
+  const cubs = data.cubriciones.filter(c => c.cabra?.crotal === crotal);
+  const crias = data.crias.filter(c => c.madre?.crotal === crotal);
+  const anots = (data.anotaciones || []).filter(a => a.cabra_id === cabra.id);
+
+  const edad = cabra.fecha_nacimiento ? Math.floor((new Date() - new Date(cabra.fecha_nacimiento)) / (365.25 * 86400000)) : null;
+  const vaciaCount = ecos.filter(e => e.resultado === 'vacia').length;
+
+  // Build timeline from all events
+  const timeline = [];
+  partos.forEach(p => timeline.push({ fecha: p.fecha, tipo: "parto", icon: "🍼", text: `Parto ${p.tipo}${p.tipo === 'aborto' ? ' ⚠️' : ''} — ${p.num_crias} crías (${p.num_hembras || 0}H ${p.num_machos || 0}M)`, color: p.tipo === 'aborto' ? "#DC2626" : "#059669", sub: p.paridera?.nombre }));
+  ecos.forEach(e => timeline.push({ fecha: e.fecha, tipo: "ecografia", icon: "🔬", text: `Ecografía: ${e.resultado}${e.resultado === 'vacia' ? ' ⚠️' : ''}`, color: e.resultado === 'vacia' ? "#DC2626" : "#7C3AED", sub: e.paridera?.nombre }));
+  cubs.forEach(c => timeline.push({ fecha: c.fecha_entrada, tipo: "cubricion", icon: "🔗", text: `Cubrición: ${c.metodo || '?'}`, color: "#EA580C", sub: `${c.paridera?.nombre || ''} ${c.macho?.crotal ? '· Macho ' + c.macho.crotal : ''}` }));
+  trats.forEach(t => timeline.push({ fecha: t.fecha, tipo: "tratamiento", icon: "💉", text: `${t.tipo}: ${t.producto || 'sin producto'}`, color: "#0891B2" }));
+  anots.forEach(a => timeline.push({ fecha: a.fecha, tipo: "anotacion", icon: "📋", text: a.texto, color: a.tipo === 'urgente' ? "#DC2626" : "#0891B2", sub: a.autor }));
+  timeline.sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+  // Alerts
+  const alerts = [];
+  if ((cabra.num_lactaciones || 0) >= 6) alerts.push({ icon: "🔴", text: `${cabra.num_lactaciones} lactaciones — animal viejo` });
+  if (prod.length > 0 && prod[0].litros < 1.0 && (cabra.dias_en_leche || 0) > 60) alerts.push({ icon: "🔴", text: `Producción muy baja (${prod[0].litros}L) con ${cabra.dias_en_leche} DEL` });
+  if (prod.length > 0 && prod[0].conductividad > 6.0) alerts.push({ icon: "🔴", text: `Conductividad alta: ${prod[0].conductividad.toFixed(2)} mS/cm` });
+  if (vaciaCount >= 2) alerts.push({ icon: "🔴", text: `Doble vacía — ${vaciaCount} ecografías vacías` });
+  if (partos.filter(p => p.tipo === 'aborto').length > 0) alerts.push({ icon: "⚠️", text: `Historial de aborto(s)` });
+
   return (
-    <div style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 16, display: "flex", flexDirection: "column", height, boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
-      <div style={{ padding: "13px 18px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", gap: 9 }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#059669", animation: "pulse 2s infinite" }} />
-        <span style={{ fontSize: 13, fontWeight: 700, color: "#1E293B" }}>Asistente Peñas Cercadas</span>
-      </div>
-      <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-        {messages.map((m, i) => (
-          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: "10px 15px", maxWidth: m.role === "user" ? "85%" : "95%", fontSize: 13, color: "#334155", lineHeight: 1.5 }}>
-            {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+    <div style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn .2s" }} onClick={onClose}>
+      <div style={{ background: "#FFF", borderRadius: 20, width: "90%", maxWidth: 800, maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.15)", animation: "slideUp .3s" }} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={{ padding: "22px 28px", borderBottom: "1px solid #F1F5F9", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "#FFF", zIndex: 2 }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#1E293B", fontFamily: "'Space Mono', monospace" }}>{crotal}</div>
+            <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 2 }}>
+              {cabra.lote?.nombre || "Sin lote"} · {cabra.estado} · {cabra.raza || "M-Granadina"}
+              {edad !== null && ` · ${edad} años`}
+            </div>
           </div>
-        ))}
-      </div>
-      {examples && <div style={{ padding: "0 16px 8px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {examples.slice(0, 3).map((ex, i) => <div key={i} onClick={() => onExample(ex)} style={{ fontSize: 11, color: "#94A3B8", padding: "5px 10px", background: "#F8FAFC", border: "1px solid #F1F5F9", borderRadius: 7, cursor: "pointer" }} onMouseEnter={e => { e.currentTarget.style.color = "#E8950A"; e.currentTarget.style.borderColor = "#FDE68A"; }} onMouseLeave={e => { e.currentTarget.style.color = "#94A3B8"; e.currentTarget.style.borderColor = "#F1F5F9"; }}>{ex}</div>)}
-      </div>}
-      <div style={{ padding: "11px 14px", borderTop: "1px solid #F1F5F9", display: "flex", gap: 9 }}>
-        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && onSend()} placeholder={placeholder}
-          style={{ flex: 1, background: "#F8FAFC", border: "2px solid #E2E8F0", borderRadius: 10, padding: "10px 15px", color: "#1E293B", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-          onFocus={e => e.target.style.borderColor = "#E8950A"} onBlur={e => e.target.style.borderColor = "#E2E8F0"} />
-        <button onClick={onSend} style={{ background: "linear-gradient(135deg, #E8950A, #CA8106)", border: "none", borderRadius: 10, padding: "10px 18px", color: "#FFF", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Enviar</button>
+          <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: 10, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 18, color: "#94A3B8", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+        </div>
+
+        <div style={{ padding: "20px 28px" }}>
+          {/* Alerts */}
+          {alerts.length > 0 && (
+            <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>⚡ Señales de alerta</div>
+              {alerts.map((a, i) => <div key={i} style={{ fontSize: 12, color: "#7F1D1D", padding: "2px 0" }}>{a.icon} {a.text}</div>)}
+            </div>
+          )}
+
+          {/* Quick stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 20 }}>
+            <div style={{ textAlign: "center", padding: "12px 8px", background: "#F8FAFC", borderRadius: 10 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#059669" }}>{prod.length > 0 ? `${prod[0].litros.toFixed(1)}L` : "-"}</div>
+              <div style={{ fontSize: 10, color: "#94A3B8" }}>Último día</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "12px 8px", background: "#F8FAFC", borderRadius: 10 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#E8950A" }}>{cabra.num_lactaciones || 0}</div>
+              <div style={{ fontSize: 10, color: "#94A3B8" }}>Lactaciones</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "12px 8px", background: "#F8FAFC", borderRadius: 10 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#7C3AED" }}>{cabra.dias_en_leche || 0}</div>
+              <div style={{ fontSize: 10, color: "#94A3B8" }}>DEL</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "12px 8px", background: "#F8FAFC", borderRadius: 10 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: prod.length > 0 && prod[0].conductividad > 6.0 ? "#DC2626" : "#64748B" }}>{prod.length > 0 ? prod[0].conductividad?.toFixed(2) || "-" : "-"}</div>
+              <div style={{ fontSize: 10, color: "#94A3B8" }}>Conductividad</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "12px 8px", background: "#F8FAFC", borderRadius: 10 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#0891B2" }}>{partos.length}</div>
+              <div style={{ fontSize: 10, color: "#94A3B8" }}>Partos</div>
+            </div>
+          </div>
+
+          {/* Production history */}
+          {prod.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>🥛 Producción ({prod.length} registros)</div>
+              <div style={{ maxHeight: 180, overflow: "auto", borderRadius: 10, border: "1px solid #F1F5F9" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead><tr style={{ background: "#F8FAFC" }}>
+                    <th style={{ padding: "8px 12px", textAlign: "left", color: "#94A3B8", fontWeight: 600, fontSize: 10.5 }}>Fecha</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right", color: "#94A3B8", fontWeight: 600, fontSize: 10.5 }}>Litros</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right", color: "#94A3B8", fontWeight: 600, fontSize: 10.5 }}>Cond.</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right", color: "#94A3B8", fontWeight: 600, fontSize: 10.5 }}>Flujo</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right", color: "#94A3B8", fontWeight: 600, fontSize: 10.5 }}>DEL</th>
+                  </tr></thead>
+                  <tbody>{prod.map((p, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #F5F7FA" }}>
+                      <td style={{ padding: "6px 12px", color: "#475569", fontFamily: "'Space Mono', monospace" }}>{p.fecha}</td>
+                      <td style={{ padding: "6px 12px", textAlign: "right", fontWeight: 600, color: "#059669", fontFamily: "'Space Mono', monospace" }}>{p.litros?.toFixed(2)}</td>
+                      <td style={{ padding: "6px 12px", textAlign: "right", color: (p.conductividad || 0) > 6.0 ? "#DC2626" : "#64748B", fontFamily: "'Space Mono', monospace" }}>{p.conductividad?.toFixed(2) || "-"}</td>
+                      <td style={{ padding: "6px 12px", textAlign: "right", color: "#64748B", fontFamily: "'Space Mono', monospace" }}>{p.flujo?.toFixed(3) || "-"}</td>
+                      <td style={{ padding: "6px 12px", textAlign: "right", color: "#64748B", fontFamily: "'Space Mono', monospace" }}>{p.dia_lactacion || "-"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Timeline */}
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>📜 Historial de vida ({timeline.length} eventos)</div>
+          {timeline.length === 0 && <div style={{ color: "#94A3B8", fontSize: 12, padding: 10 }}>Sin eventos registrados aún.</div>}
+          <div style={{ position: "relative", paddingLeft: 24 }}>
+            {timeline.length > 0 && <div style={{ position: "absolute", left: 9, top: 4, bottom: 4, width: 2, background: "#E2E8F0" }} />}
+            {timeline.map((ev, i) => (
+              <div key={i} style={{ position: "relative", paddingBottom: 14 }}>
+                <div style={{ position: "absolute", left: -20, top: 2, width: 18, height: 18, borderRadius: "50%", background: `${ev.color}15`, border: `2px solid ${ev.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9 }}>{ev.icon}</div>
+                <div style={{ paddingLeft: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, color: "#94A3B8", fontFamily: "'Space Mono', monospace", fontWeight: 600 }}>{ev.fecha}</span>
+                    <span style={{ fontSize: 12.5, color: "#1E293B", fontWeight: 500 }}>{ev.text}</span>
+                  </div>
+                  {ev.sub && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 1 }}>{ev.sub}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
+}
+function ChatBox({ messages, input, setInput, onSend, examples, onExample, placeholder, height = 460 }) {
+  const [expanded, setExpanded] = useState(false);
+  const msgsEnd = useRef(null);
+  useEffect(() => { msgsEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const chatContent = (
+    <div style={{ background: "#FFF", border: expanded ? "none" : "1px solid #EEF2F6", borderRadius: expanded ? 0 : 16, display: "flex", flexDirection: "column", height: expanded ? "100%" : height, boxShadow: expanded ? "none" : "0 1px 4px rgba(0,0,0,0.03)" }}>
+      <div style={{ padding: "13px 18px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#059669", animation: "pulse 2s infinite" }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#1E293B" }}>Asistente Peñas Cercadas</span>
+        </div>
+        <button onClick={() => setExpanded(!expanded)} title={expanded ? "Reducir" : "Ampliar chat"} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "4px 10px", fontSize: 12, cursor: "pointer", color: "#64748B", fontWeight: 600 }}>
+          {expanded ? "✕ Cerrar" : "⛶ Ampliar"}
+        </button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: expanded ? "20px 28px" : 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: expanded ? "14px 20px" : "10px 15px", maxWidth: m.role === "user" ? "85%" : "95%", fontSize: expanded ? 14 : 13, color: "#334155", lineHeight: 1.5 }}>
+            {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+          </div>
+        ))}
+        <div ref={msgsEnd} />
+      </div>
+      {examples && !expanded && <div style={{ padding: "0 16px 8px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {examples.slice(0, 3).map((ex, i) => <div key={i} onClick={() => onExample(ex)} style={{ fontSize: 11, color: "#94A3B8", padding: "5px 10px", background: "#F8FAFC", border: "1px solid #F1F5F9", borderRadius: 7, cursor: "pointer" }} onMouseEnter={e => { e.currentTarget.style.color = "#E8950A"; e.currentTarget.style.borderColor = "#FDE68A"; }} onMouseLeave={e => { e.currentTarget.style.color = "#94A3B8"; e.currentTarget.style.borderColor = "#F1F5F9"; }}>{ex}</div>)}
+      </div>}
+      <div style={{ padding: expanded ? "14px 28px" : "11px 14px", borderTop: "1px solid #F1F5F9", display: "flex", gap: 9 }}>
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && onSend()} placeholder={placeholder}
+          style={{ flex: 1, background: "#F8FAFC", border: "2px solid #E2E8F0", borderRadius: 10, padding: expanded ? "14px 18px" : "10px 15px", color: "#1E293B", fontSize: expanded ? 15 : 13, outline: "none", boxSizing: "border-box" }}
+          onFocus={e => e.target.style.borderColor = "#E8950A"} onBlur={e => e.target.style.borderColor = "#E2E8F0"} />
+        <button onClick={onSend} style={{ background: "linear-gradient(135deg, #E8950A, #CA8106)", border: "none", borderRadius: 10, padding: expanded ? "14px 24px" : "10px 18px", color: "#FFF", fontWeight: 700, fontSize: expanded ? 15 : 13, cursor: "pointer" }}>Enviar</button>
+      </div>
+    </div>
+  );
+
+  if (expanded) {
+    return (
+      <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn .2s" }}>
+        <div style={{ width: "90%", maxWidth: 900, height: "85vh", borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.15)", animation: "slideUp .3s" }}>
+          {chatContent}
+        </div>
+      </div>
+    );
+  }
+  return chatContent;
 }
 function CustomTooltip({ active, payload, label, formatter }) {
   if (!active || !payload) return null;
@@ -405,6 +585,7 @@ function LoadingScreen() {
 // ==========================================
 function DashboardPage({ data }) {
   const [modal, setModal] = useState(null);
+  const [cabraHistorial, setCabraHistorial] = useState(null);
   const LOTE_COLORS = { "Lote 1": "#E8950A", "Lote 2": "#DB2777", "Lote 3": "#7C3AED", "Lote 4": "#DC2626", "Lote 5": "#0891B2", "Lote 6": "#EA580C", "Lote 13": "#059669" };
 
   const lotesSorted = [...data.lotes].filter(l => l.cabras > 0).sort((a, b) => b.cabras - a.cabras);
@@ -656,8 +837,10 @@ function DashboardPage({ data }) {
           { key: "estado", label: "Estado", render: v => <Badge text={v} color={v === "lactacion" ? "#059669" : v === "gestante" ? "#7C3AED" : v === "cubricion" ? "#EA580C" : v === "preparto" ? "#DB2777" : "#94A3B8"} /> },
           { key: "estado_gine", label: "Est. Gine." },
         ];
-        return <DataModal title="Cabras" icon="🐐" accent="#E8950A" data={cabrasModal} columns={cabraCols} onClose={() => setModal(null)} searchPH="Buscar crotal, estado, lote..." folders={cabraFolders} />;
+        return <DataModal title="Cabras" icon="🐐" accent="#E8950A" data={cabrasModal} columns={cabraCols} onClose={() => setModal(null)} searchPH="Buscar crotal, estado, lote..." folders={cabraFolders} onRowClick={(r) => setCabraHistorial(r.crotal)} />;
       })()}
+
+      {cabraHistorial && <CabraHistorialModal crotal={cabraHistorial} data={data} onClose={() => setCabraHistorial(null)} />}
 
       {modal === "partos" && (() => {
         const d = partosModal.map(p => ({ ...p, __folder: p.paridera || "Sin paridera" }));
@@ -1033,25 +1216,11 @@ function ImportadorPage({ data, refresh }) {
         // Find cabra in existing data
         let cabra = data.cabras.find(c => c.crotal === crotal);
         
-        // If not found, create it
+        // If not found, DON'T create — skip and warn
+        // New cabras should come through censo import, not FLM
         if (!cabra) {
-          const loteName = mapGrupo(grupo);
-          let lote = loteName ? data.lotes.find(l => l.nombre === loteName) : null;
-          if (!lote && loteName) {
-            const { data: created } = await supabase.from("lote").insert([{
-              nombre: loteName, tipo: "alta_produccion", descripcion: grupo
-            }]).select().single();
-            if (created) { lote = created; data.lotes.push({ ...created, cabras: 0 }); }
-          }
-          const { data: newC, error: errC } = await supabase.from("cabra").insert([{
-            crotal, estado: "lactacion", sexo: "hembra", raza: "Murciano-Granadina",
-            num_lactaciones: lactacion, dias_en_leche: del_dias,
-            lote_id: lote?.id || null,
-            notas: `Añadida desde informe FLM ${reportDate}`
-          }]).select().single();
-          if (errC) { errors++; errorList.push(`${crotal}: error creando cabra — ${errC.message}`); continue; }
-          cabra = newC;
-          newCabras++;
+          errorList.push(`${crotal}: no existe en el sistema (no se crea automáticamente — actualiza el censo si es nueva)`);
+          continue;
         }
 
         // Check if lote changed
@@ -1397,7 +1566,7 @@ function ConsultasPage({ data }) {
     }
     
     // Include production data when relevant
-    if (msg.includes("produc") || msg.includes("leche") || msg.includes("litro") || msg.includes("mejor") || msg.includes("peor") || msg.includes("rendimiento") || msg.includes("descart") || msg.includes("matadero")) {
+    if (msg.includes("produc") || msg.includes("leche") || msg.includes("litro") || msg.includes("mejor") || msg.includes("peor") || msg.includes("rendimiento") || msg.includes("descart") || msg.includes("matadero") || msg.includes("conductiv") || msg.includes("mastitis") || msg.includes("sanid") || msg.includes("alerta") || msg.includes("flujo") || msg.includes("ordeñ")) {
       const sorted = [...todayProd].sort((a, b) => (b.litros || 0) - (a.litros || 0));
       if (sorted.length > 0) {
         ctx += `\n\nPRODUCCIÓN DEL DÍA ${latestDate} (${sorted.length} cabras, ${sorted.reduce((s, p) => s + (p.litros || 0), 0).toFixed(1)}L total):`;
@@ -1412,6 +1581,19 @@ function ConsultasPage({ data }) {
           ctx += `\n  ${cabra?.crotal || '?'}: ${p.litros}L, DEL=${p.dia_lactacion}, Lact=${p.lactacion_num}, LitTotal=${p.litros_totales_lactacion}, Cond=${p.conductividad}, Lote=${cabra?.lote?.nombre || '?'}`;
         });
       }
+    }
+
+    // Always include: high conductivity cabras with full details
+    const highCondProd = todayProd.filter(p => p.conductividad > 6.0);
+    if (highCondProd.length > 0) {
+      ctx += `\n\nCABRAS CONDUCTIVIDAD ALTA >6.0 mS/cm (${highCondProd.length}):`;
+      highCondProd.sort((a, b) => (b.conductividad || 0) - (a.conductividad || 0)).forEach(p => {
+        const cabra = data.cabras.find(c => c.id === p.cabra_id);
+        ctx += `\n  ${cabra?.crotal || '?'}: Cond=${p.conductividad}, ${p.litros}L/día, DEL=${p.dia_lactacion}, Lact=${p.lactacion_num}, Flujo=${p.flujo}, TiempoOrdeño=${p.tiempo_ordeno}min, Lote=${cabra?.lote?.nombre || '?'}`;
+        // Add paridera info if available
+        const cubr = data.cubriciones.find(cu => cu.cabra_id === p.cabra_id);
+        if (cubr) ctx += `, Paridera=${cubr.paridera?.nombre || '?'}`;
+      });
     }
     
     // Include partos data when relevant
@@ -1448,17 +1630,67 @@ function ConsultasPage({ data }) {
     }
     
     // Include lote details when relevant
-    if (msg.includes("lote") || msg.includes("grupo") || msg.includes("manada") || msg.includes("distribu")) {
+    if (msg.includes("lote") || msg.includes("grupo") || msg.includes("manada") || msg.includes("distribu") || msg.includes("secand") || msg.includes("pariend")) {
       ctx += `\n\nDETALLE POR LOTE:`;
       data.lotes.filter(l => l.cabras > 0).sort((a, b) => b.cabras - a.cabras).forEach(l => {
         const loteProd = todayProd.filter(p => { const c = data.cabras.find(cc => cc.id === p.cabra_id); return c && c.lote_id === l.id; });
         const totalL = loteProd.reduce((s, p) => s + (p.litros || 0), 0);
         const mediaL = loteProd.length > 0 ? totalL / loteProd.length : 0;
-        ctx += `\n  ${l.nombre}: ${l.cabras} cabras, ${totalL.toFixed(1)}L total, ${mediaL.toFixed(2)}L/cabra media`;
+        ctx += `\n  ${l.nombre} [${l.estado || 'produccion'}]: ${l.cabras} cabras, ${totalL.toFixed(1)}L total, ${mediaL.toFixed(2)}L/cabra media`;
       });
     }
     
-    // Specific goat lookup
+    // Include anotaciones veterinarias when relevant
+    if (msg.includes("anota") || msg.includes("veterinar") || msg.includes("vet") || msg.includes("observ") || msg.includes("nota") || msg.includes("bulto") || msg.includes("pezuña") || msg.includes("enferm") || msg.includes("sanid")) {
+      const anotaciones = data.anotaciones || [];
+      if (anotaciones.length > 0) {
+        ctx += `\n\nANOTACIONES VETERINARIAS (${anotaciones.length}):`;
+        anotaciones.slice(0, 30).forEach(a => {
+          ctx += `\n  [${a.fecha}] ${a.cabra?.crotal || "GENERAL"} (${a.tipo}): ${a.texto}`;
+        });
+      }
+    }
+    
+    // Include alertas sanitarias when relevant
+    if (msg.includes("alerta") || msg.includes("sanid") || msg.includes("mastitis") || msg.includes("conductiv") || msg.includes("problema")) {
+      const alertas = data.alertasSanitarias || [];
+      const activas = alertas.filter(a => a.estado === "activa");
+      if (activas.length > 0) {
+        ctx += `\n\nALERTAS SANITARIAS ACTIVAS (${activas.length}):`;
+        activas.forEach(a => {
+          ctx += `\n  [${a.fecha}] ${a.titulo} (${a.severidad}): ${a.descripcion || ''}`;
+          if (a.cabras_afectadas?.length) ctx += ` → Cabras: ${a.cabras_afectadas.join(', ')}`;
+        });
+      }
+    }
+    
+    // Include historical comparison when relevant
+    if (msg.includes("histor") || msg.includes("tendencia") || msg.includes("evoluci") || msg.includes("compar") || msg.includes("ayer") || msg.includes("semana") || msg.includes("bajad") || msg.includes("subid") || msg.includes("cambio")) {
+      const allDates = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
+      if (allDates.length >= 2) {
+        const prevDate = allDates[1];
+        const prevDayProd = prod.filter(p => p.fecha === prevDate);
+        ctx += `\n\nCOMPARACIÓN ${latestDate} vs ${prevDate}:`;
+        const todayTotal = todayProd.reduce((s, p) => s + (p.litros || 0), 0);
+        const prevTotal = prevDayProd.reduce((s, p) => s + (p.litros || 0), 0);
+        ctx += `\n  Hoy: ${todayTotal.toFixed(1)}L (${todayProd.length} cabras) → Ayer: ${prevTotal.toFixed(1)}L (${prevDayProd.length} cabras)`;
+        // Biggest drops
+        const drops = [];
+        todayProd.forEach(p => {
+          const prev = prevDayProd.find(pp => pp.cabra_id === p.cabra_id);
+          if (prev && prev.litros > 0.5 && p.litros < prev.litros * 0.7) {
+            const cabra = data.cabras.find(c => c.id === p.cabra_id);
+            drops.push({ crotal: cabra?.crotal || '?', hoy: p.litros, ayer: prev.litros, cambio: ((p.litros - prev.litros) / prev.litros * 100) });
+          }
+        });
+        if (drops.length > 0) {
+          drops.sort((a, b) => a.cambio - b.cambio);
+          ctx += `\n  Mayores caídas (>30%): ${drops.slice(0, 15).map(d => `${d.crotal}: ${d.ayer.toFixed(1)}→${d.hoy.toFixed(1)}L (${d.cambio.toFixed(0)}%)`).join('; ')}`;
+        }
+      }
+    }
+    
+    // Specific goat lookup — FULL LIFE HISTORY
     const crotalMatch = userMsg.match(/\b(\d{5,6})\b/);
     if (crotalMatch) {
       const crotal = crotalMatch[1];
@@ -1468,16 +1700,127 @@ function ConsultasPage({ data }) {
       const tratsC = data.tratamientos.filter(t => t.cabra?.crotal === crotal);
       const cubsC = data.cubriciones.filter(c => c.cabra?.crotal === crotal);
       const criasC = data.crias.filter(c => c.madre?.crotal === crotal);
-      const prodC = cabra ? prodByCabraId[cabra.id] : null;
-      ctx += `\n\nFICHA COMPLETA CABRA ${crotal}:`;
-      if (cabra) ctx += `\nEstado: ${cabra.estado}, Lote: ${cabra.lote?.nombre || '-'}, Lactaciones: ${cabra.num_lactaciones || '-'}, DEL: ${cabra.dias_en_leche || '-'}, Edad: ${cabra.edad_meses || '-'} meses`;
-      if (prodC) ctx += `\nProducción hoy: ${prodC.litros}L, Prom10d: ${prodC.promedio_10d || prodC.media_10d || '-'}, LitTotales: ${prodC.litros_totales_lactacion}, Conductividad: ${prodC.conductividad}, Flujo: ${prodC.flujo}, Tiempo: ${prodC.tiempo_ordeno}min`;
-      if (partosC.length > 0) ctx += `\nPartos (${partosC.length}): ${partosC.map(p => `${p.fecha} ${p.tipo} ${p.num_crias}crías`).join('; ')}`;
-      if (ecosC.length > 0) ctx += `\nEcografías (${ecosC.length}): ${ecosC.map(e => `${e.fecha} ${e.resultado}`).join('; ')}`;
-      if (tratsC.length > 0) ctx += `\nTratamientos (${tratsC.length}): ${tratsC.map(t => `${t.fecha} ${t.tipo} ${t.producto || ''}`).join('; ')}`;
-      if (cubsC.length > 0) ctx += `\nCubriciones (${cubsC.length}): ${cubsC.map(c => `${c.fecha_entrada} ${c.metodo}`).join('; ')}`;
-      if (criasC.length > 0) ctx += `\nCrías: ${criasC.map(c => `peseta ${c.peseta}`).join(', ')}`;
-      if (!cabra) ctx += `\nEsta cabra NO existe en el sistema.`;
+      const anotC = (data.anotaciones || []).filter(a => a.cabra_id === cabra?.id);
+      
+      ctx += `\n\n${'='.repeat(50)}\nFICHA COMPLETA CABRA ${crotal}\n${'='.repeat(50)}`;
+      
+      if (!cabra) {
+        ctx += `\n⚠️ Esta cabra NO existe en el sistema.`;
+      } else {
+        // === IDENTIDAD ===
+        ctx += `\n\n## IDENTIDAD`;
+        ctx += `\nCrotal: ${cabra.crotal}`;
+        ctx += `\nRIIA: ${cabra.riia || 'sin datos'}`;
+        ctx += `\nID Electrónico: ${cabra.id_electronico || 'sin datos'}`;
+        ctx += `\nFecha nacimiento: ${cabra.fecha_nacimiento || 'sin datos'}`;
+        const edad = cabra.fecha_nacimiento ? Math.floor((new Date() - new Date(cabra.fecha_nacimiento)) / (365.25 * 86400000)) : null;
+        if (edad !== null) ctx += ` (${edad} años)`;
+        ctx += `\nRaza: ${cabra.raza || 'Murciano-Granadina'}`;
+        ctx += `\nEstado: ${cabra.estado}`;
+        ctx += `\nLote: ${cabra.lote?.nombre || 'sin lote'}`;
+        ctx += `\nLactaciones: ${cabra.num_lactaciones || 0}`;
+        ctx += `\nDEL actual: ${cabra.dias_en_leche || 0}`;
+        
+        // === PRODUCCIÓN HISTÓRICA (TODOS los días) ===
+        const allProdC = prod.filter(p => p.cabra_id === cabra.id).sort((a, b) => b.fecha.localeCompare(a.fecha));
+        ctx += `\n\n## PRODUCCIÓN — ${allProdC.length} registros en ${[...new Set(allProdC.map(p => p.fecha))].length} días`;
+        
+        if (allProdC.length > 0) {
+          // Latest day
+          const latest = allProdC[0];
+          ctx += `\nÚltimo registro (${latest.fecha}): ${latest.litros}L, Cond=${latest.conductividad}, Flujo=${latest.flujo}, Tiempo=${latest.tiempo_ordeno}min, DEL=${latest.dia_lactacion}, Prom10d=${latest.promedio_10d || latest.media_10d || '-'}, LitTotalesLact=${latest.litros_totales_lactacion}`;
+          
+          // Day by day history
+          ctx += `\nHistorial diario:`;
+          allProdC.slice(0, 30).forEach(p => {
+            ctx += `\n  ${p.fecha}: ${p.litros}L, Cond=${p.conductividad || '-'}, Flujo=${p.flujo || '-'}, DEL=${p.dia_lactacion}`;
+          });
+          
+          // Trend analysis
+          const litrosArr = allProdC.map(p => p.litros || 0);
+          const condArr = allProdC.filter(p => p.conductividad > 0).map(p => p.conductividad);
+          const flujoArr = allProdC.filter(p => p.flujo > 0).map(p => p.flujo);
+          
+          if (litrosArr.length >= 2) {
+            const avgRecent = litrosArr.slice(0, Math.min(3, litrosArr.length)).reduce((s, v) => s + v, 0) / Math.min(3, litrosArr.length);
+            const avgOlder = litrosArr.slice(-Math.min(3, litrosArr.length)).reduce((s, v) => s + v, 0) / Math.min(3, litrosArr.length);
+            const trend = avgOlder > 0 ? ((avgRecent - avgOlder) / avgOlder * 100) : 0;
+            ctx += `\n\nTENDENCIA PRODUCCIÓN: Reciente=${avgRecent.toFixed(2)}L vs Anterior=${avgOlder.toFixed(2)}L → ${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`;
+          }
+          if (condArr.length >= 2) {
+            const condRecent = condArr.slice(0, Math.min(3, condArr.length)).reduce((s, v) => s + v, 0) / Math.min(3, condArr.length);
+            const condOlder = condArr.slice(-Math.min(3, condArr.length)).reduce((s, v) => s + v, 0) / Math.min(3, condArr.length);
+            ctx += `\nTENDENCIA CONDUCTIVIDAD: Reciente=${condRecent.toFixed(2)} vs Anterior=${condOlder.toFixed(2)} ${condRecent > condOlder ? '⚠️ SUBIENDO' : '✅ Estable/bajando'}`;
+          }
+          if (flujoArr.length >= 2) {
+            const flujoRecent = flujoArr.slice(0, Math.min(3, flujoArr.length)).reduce((s, v) => s + v, 0) / Math.min(3, flujoArr.length);
+            ctx += `\nFLUJO RECIENTE: ${flujoRecent.toFixed(3)} L/min ${flujoRecent < 0.1 ? '⚠️ MUY BAJO' : ''}`;
+          }
+          
+          // Production stats
+          const avgTotal = litrosArr.reduce((s, v) => s + v, 0) / litrosArr.length;
+          const maxProd = Math.max(...litrosArr);
+          const minProd = Math.min(...litrosArr);
+          ctx += `\nESTADÍSTICAS: Media=${avgTotal.toFixed(2)}L, Máx=${maxProd.toFixed(2)}L, Mín=${minProd.toFixed(2)}L`;
+        } else {
+          ctx += `\nSin registros de producción — probablemente chota joven o no ordeñada aún.`;
+        }
+        
+        // === REPRODUCCIÓN ===
+        ctx += `\n\n## REPRODUCCIÓN`;
+        if (cubsC.length > 0) {
+          ctx += `\nCubriciones (${cubsC.length}):`;
+          cubsC.forEach(c => ctx += `\n  ${c.fecha_entrada}: ${c.metodo || '?'}, Paridera: ${c.paridera?.nombre || '?'}, Macho: ${c.macho?.crotal || '?'}`);
+        } else ctx += `\nCubriciones: ninguna registrada`;
+        
+        if (ecosC.length > 0) {
+          ctx += `\nEcografías (${ecosC.length}):`;
+          ecosC.forEach(e => ctx += `\n  ${e.fecha}: ${e.resultado} (${e.paridera?.nombre || '?'})`);
+          const vaciaCount = ecosC.filter(e => e.resultado === 'vacia').length;
+          if (vaciaCount >= 2) ctx += `\n  🔴 DOBLE VACÍA — ${vaciaCount} ecografías vacías`;
+          else if (vaciaCount === 1) ctx += `\n  ⚠️ 1 ecografía vacía registrada`;
+        } else ctx += `\nEcografías: ninguna registrada`;
+        
+        if (partosC.length > 0) {
+          ctx += `\nPartos (${partosC.length}):`;
+          partosC.forEach(p => {
+            ctx += `\n  ${p.fecha}: ${p.tipo}${p.tipo === 'aborto' ? ' ⚠️' : ''}, ${p.num_crias} crías (${p.num_hembras || 0}H ${p.num_machos || 0}M), Paridera: ${p.paridera?.nombre || '?'}`;
+          });
+          const abortos = partosC.filter(p => p.tipo === 'aborto').length;
+          if (abortos > 0) ctx += `\n  🔴 ${abortos} ABORTO(S) registrado(s)`;
+        } else ctx += `\nPartos: ninguno registrado`;
+        
+        if (criasC.length > 0) {
+          ctx += `\nCrías hembra: ${criasC.map(c => `peseta ${c.peseta} (${c.fecha_nacimiento || '?'})`).join(', ')}`;
+        }
+        
+        // === SANIDAD ===
+        ctx += `\n\n## SANIDAD`;
+        if (tratsC.length > 0) {
+          ctx += `\nTratamientos (${tratsC.length}):`;
+          tratsC.forEach(t => ctx += `\n  ${t.fecha}: ${t.tipo} — ${t.producto || 'sin producto'}`);
+        } else ctx += `\nTratamientos: ninguno registrado`;
+        
+        if (anotC.length > 0) {
+          ctx += `\nAnotaciones veterinarias (${anotC.length}):`;
+          anotC.forEach(a => ctx += `\n  [${a.fecha}] (${a.tipo}): ${a.texto}`);
+        } else ctx += `\nAnotaciones vet: ninguna`;
+        
+        // === VALORACIÓN AUTOMÁTICA ===
+        ctx += `\n\n## SEÑALES DE ALERTA`;
+        const flags = [];
+        if (cabra.num_lactaciones >= 6) flags.push(`🔴 ${cabra.num_lactaciones} lactaciones — animal viejo`);
+        if (allProdC.length > 0 && allProdC[0].litros < 1.0 && (cabra.dias_en_leche || 0) > 60) flags.push(`🔴 Producción muy baja (${allProdC[0].litros}L) con ${cabra.dias_en_leche} DEL`);
+        if (allProdC.length > 0 && allProdC[0].conductividad > 6.0) flags.push(`🔴 Conductividad alta: ${allProdC[0].conductividad} — posible mastitis`);
+        if (allProdC.length > 0 && allProdC[0].flujo > 0 && allProdC[0].flujo < 0.1) flags.push(`⚠️ Flujo muy bajo: ${allProdC[0].flujo}`);
+        if (ecosC.filter(e => e.resultado === 'vacia').length >= 2) flags.push(`🔴 Doble vacía — problemas de fertilidad`);
+        if (partosC.filter(p => p.tipo === 'aborto').length > 0) flags.push(`⚠️ Historial de aborto(s)`);
+        if (anotC.length > 0) flags.push(`📋 Tiene ${anotC.length} anotación(es) veterinaria(s) — revisar`);
+        if (flags.length === 0) flags.push(`✅ Sin señales de alerta detectadas`);
+        flags.forEach(f => ctx += `\n${f}`);
+        
+        ctx += `\n\nCon toda esta información, analiza el estado general de esta cabra. Si ves señales preocupantes, da una recomendación concreta (seguir, vigilar, tratar, o descartar).`;
+      }
     }
     
     return ctx;
@@ -2166,7 +2509,25 @@ function ProduccionPage({ data }) {
     if (!prodMsg.trim()) return;
     const userMsg = prodMsg;
     setProdMsgs(p => [...p, { role: "user", text: userMsg }]); setProdMsg(""); setProdLd(true);
-    const prodCtx = dataCtx + `\n\nDATOS DE PRODUCCIÓN DE HOY (${latestDate || "sin datos"}):\nTotal litros: ${totalLitros.toFixed(1)}\nMedia/cabra: ${avgLitros.toFixed(2)}L\nCabras en ordeño: ${stats.length}\nMedia conductividad: ${avgConductividad.toFixed(2)}\n\nTOP 10 productoras: ${sortedByProd.slice(0, 10).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L (DEL=${s.del}, Lact=${s.lactacion})`).join("; ")}\n\nPEORES 10: ${sortedByProd.slice(-10).reverse().map(s => `${s.crotal}: ${s.litros.toFixed(2)}L (DEL=${s.del}, Lact=${s.lactacion})`).join("; ")}\n\nPOR LOTE: ${loteData.map(l => `${l.nombre}: ${l.cabras} cabras, media ${l.media.toFixed(2)}L`).join("; ")}\n\nALERTAS CONDUCTIVIDAD (>6.0): ${stats.filter(s => s.conductividad > 6.0).map(s => `${s.crotal}: ${s.conductividad.toFixed(2)}`).join(", ") || "ninguna"}\n\nCANDIDATAS DESCARTE (baja prod + muchas lactaciones): ${cullCandidates.slice(0, 10).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L, lact=${s.lactacion}`).join("; ") || "ninguna"}\n\nESTRELLAS EMERGENTES (1ª lactación >3L): ${risingStars.slice(0, 10).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L`).join(", ") || "ninguna"}`;
+    
+    let prodCtx = dataCtx;
+    prodCtx += `\n\nLOTES SECÁNDOSE (excluidos del análisis de rendimiento): ${data.lotes.filter(l => l.estado === 'secandose').map(l => l.nombre).join(', ') || 'ninguno'}`;
+    prodCtx += `\n\nDATOS DE PRODUCCIÓN DE HOY (${latestDate || "sin datos"}):\nTotal litros: ${totalLitros.toFixed(1)}\nMedia/cabra: ${avgLitros.toFixed(2)}L\nCabras en ordeño: ${stats.length}\nMedia conductividad: ${avgConductividad.toFixed(2)}`;
+    prodCtx += `\n\nTOP 15 productoras: ${sortedByProd.slice(0, 15).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L (DEL=${s.del}, Lact=${s.lactacion}, Cond=${s.conductividad.toFixed(2)})`).join("; ")}`;
+    prodCtx += `\nPEORES 15: ${sortedByProd.slice(-15).reverse().map(s => `${s.crotal}: ${s.litros.toFixed(2)}L (DEL=${s.del}, Lact=${s.lactacion}, Cond=${s.conductividad.toFixed(2)})`).join("; ")}`;
+    prodCtx += `\n\nPOR LOTE: ${loteData.map(l => `${l.nombre}: ${l.cabras} cabras, media ${l.media.toFixed(2)}L, cond media ${l.condMedia.toFixed(2)}`).join("; ")}`;
+    prodCtx += `\n\nALERTAS CONDUCTIVIDAD (>6.0): ${Object.values(allCabraStats).filter(s => s.conductividad > 6.0).map(s => `${s.crotal}: ${s.conductividad.toFixed(2)} [${s.lote}]`).join(", ") || "ninguna"}`;
+    prodCtx += `\n\nCANDIDATAS DESCARTE (baja prod + muchas lactaciones): ${cullCandidates.slice(0, 15).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L, lact=${s.lactacion}`).join("; ") || "ninguna"}`;
+    prodCtx += `\nESTRELLAS EMERGENTES (1ª lactación >3L): ${risingStars.slice(0, 10).map(s => `${s.crotal}: ${s.litros.toFixed(2)}L`).join(", ") || "ninguna"}`;
+    
+    // Historical comparison
+    if (hasTwodays) {
+      prodCtx += `\n\nCOMPARACIÓN HOY vs AYER:`;
+      prodCtx += `\nMayores caídas: ${bigDrops.slice(0, 10).map(c => `${c.crotal}: ${c.litrosAyer?.toFixed(1)}→${c.litrosHoy.toFixed(1)}L (${c.cambio.toFixed(0)}%)`).join('; ') || 'ninguna >25%'}`;
+      prodCtx += `\nMayores subidas: ${bigRises.slice(0, 10).map(c => `${c.crotal}: ${c.litrosAyer?.toFixed(1)}→${c.litrosHoy.toFixed(1)}L (+${c.cambio.toFixed(0)}%)`).join('; ') || 'ninguna >25%'}`;
+      prodCtx += `\nComparativa lotes: ${loteComparison.map(l => `${l.nombre}: ${l.mediaHoy}L/cab ${l.cambio !== null ? `(${l.cambio >= 0 ? '+' : ''}${l.cambio.toFixed(1)}% vs ayer)` : ''}`).join('; ')}`;
+    }
+    
     const response = await askClaude(userMsg, prodCtx);
     setProdMsgs(p => [...p, { role: "assistant", text: response }]);
     setProdLd(false);
@@ -2621,7 +2982,16 @@ function SanidadPage({ data, refresh }) {
     if (!sanMsg.trim()) return;
     const userMsg = sanMsg;
     setSanMsgs(p => [...p, { role: "user", text: userMsg }]); setSanMsg(""); setSanLd(true);
-    const sanCtx = dataCtx + `\n\nDATOS SANITARIOS:\nCabras conductividad >6.0: ${highCond.length} (${highCond.slice(0, 15).map(c => `${c.crotal}: ${c.conductividad.toFixed(2)} mS/cm [${c.lote}]`).join("; ")})\nPatrones detectados: ${condPatterns.map(p => p.msg).join("; ") || "ninguno"}\nConductividad en aumento: ${condRising.slice(0, 10).map(c => `${c.crotal}: ${c.condAyer.toFixed(2)}→${c.condHoy.toFixed(2)}`).join("; ") || "ninguna"}\nCandidatas descarte: ${cullCandidates.length} (${cullCandidates.slice(0, 10).map(c => `${c.crotal}: ${c.litros.toFixed(1)}L, L${c.lactacion}`).join("; ")})\nDoble vacías: ${dobleVacias.map(d => `${d.crotal} (${d.count}x)`).join(", ") || "ninguna"}\nAnotaciones vet recientes: ${anotaciones.slice(0, 10).map(a => `[${a.fecha}] ${a.cabra?.crotal || "general"}: ${a.texto}`).join("; ") || "ninguna"}\n\nAl analizar estos datos, busca correlaciones entre conductividad alta y parideras, lotes, o tratamientos. Propón hipótesis de manejo y recomendaciones prácticas.`;
+    const sanCtx = dataCtx + `\n\nDATOS SANITARIOS COMPLETOS:` +
+      `\nCabras conductividad >6.0: ${highCond.length}` +
+      `\n${highCond.slice(0, 25).map(c => `  ${c.crotal}: Cond=${c.conductividad.toFixed(2)}, ${c.litros.toFixed(1)}L, DEL=${c.del}, L${c.lactacion}, ${c.lote}${c.isSecando ? ' (SECÁNDOSE)' : ''}${c.paridera ? ', Paridera=' + c.paridera : ''}`).join('\n')}` +
+      `\n\nPatrones detectados: ${condPatterns.map(p => p.msg).join("; ") || "ninguno"}` +
+      `\nConductividad en aumento: ${condRising.slice(0, 15).map(c => `${c.crotal}: ${c.condAyer.toFixed(2)}→${c.condHoy.toFixed(2)} (+${c.subida.toFixed(2)}) [${c.lote}]`).join("; ") || "ninguna"}` +
+      `\n\nCandidatas descarte: ${cullCandidates.length} (${cullCandidates.slice(0, 15).map(c => `${c.crotal}: ${c.litros.toFixed(1)}L, L${c.lactacion}, D${c.del}${c.vaciaCount >= 2 ? ' DOBLE VACÍA' : ''}`).join("; ")})` +
+      `\nDoble vacías: ${dobleVacias.map(d => `${d.crotal} (${d.count}x, ${d.lote})`).join(", ") || "ninguna"}` +
+      `\n\nAnotaciones veterinarias (${anotaciones.length}):` +
+      `\n${anotaciones.slice(0, 20).map(a => `  [${a.fecha}] ${a.cabra?.crotal || "GENERAL"} (${a.tipo}): ${a.texto}`).join('\n')}` +
+      `\n\nAl analizar estos datos, busca correlaciones entre conductividad alta y parideras, lotes, o tratamientos. Cruza con partos recientes, ecografías y anotaciones. Propón hipótesis de manejo y recomendaciones prácticas.`;
     const response = await askClaude(userMsg, sanCtx, "general");
     setSanMsgs(p => [...p, { role: "assistant", text: response }]);
     setSanLd(false);

@@ -103,7 +103,6 @@ function buildDataContext(data) {
   // Se envía SIEMPRE para que la IA esté al tanto
   // =============================================
   const anomalias = [];
-  const prod = data.produccion || [];
   const latestDate2 = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a))[0];
   const todayProd2 = latestDate2 ? prod.filter(p => p.fecha === latestDate2) : [];
   const prodById = {};

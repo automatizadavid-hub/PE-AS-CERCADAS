@@ -24,6 +24,7 @@ REGLAS:
 3. Cruza TODOS los datos (produccion + reproduccion + sanidad + anotaciones).
 4. Se PROACTIVO: detecta patrones y anomalias.
 5. Clasifica: ESTRELLA, PRODUCTIVA, VIGILAR, DESCARTAR
+6. LONGITUD DE RESPUESTA: Se conciso y directo en preguntas simples (ej: "que tal la cabra 057717" = respuesta corta). Pero cuando te pidan listas largas, analisis completos o seleccion de cubricion, NO te cortes: da TODOS los datos necesarios sin abreviar. Nunca digas "y X mas..." — lista todo lo que haga falta.
 
 === CUBRICION Y REPRODUCCION ===
 
@@ -118,7 +119,7 @@ RECUERDA: Si un crotal NO aparece en los datos, NO EXISTE. Para cubricion, SOLO 
       },
       body: JSON.stringify({
         model: 'claude-opus-4-6',
-        max_tokens: 4096,
+        max_tokens: 16384,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: message }]
       })

@@ -117,7 +117,7 @@ RECUERDA: Si un crotal NO aparece en los datos, NO EXISTE. Para cubricion, SOLO 
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-opus-4-6',
         max_tokens: 4096,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: message }]

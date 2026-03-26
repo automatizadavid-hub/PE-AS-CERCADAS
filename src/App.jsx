@@ -1210,14 +1210,14 @@ function RentabilidadPage({ data, saveChat }) {
 function ImportadorPage({ data, refresh, saveChat }) {
   const [dO, setDO] = useState(false);
   const [m, setM] = useState("");
-  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un CSV del FLM o cualquier archivo de datos. Lo analizo y puedo importarlo a la base de datos. También puedes decirme cosas como 'Se ha muerto la cabra 057600' o 'Cambia la 056749 al Lote 4'." }]);
+  const [ms, setMs] = useState([{ role: "assistant", text: "Sube un CSV o dime lo que has hecho y lo registro directamente en la base de datos.\n\n**Por chat puedo registrar:**\n• Vacunaciones por lote: \"He vacunado al Lote 3 de enterotoxemias\"\n• Desparasitaciones: \"He desparasitado el Lote 6 entero\"\n• Tratamientos individuales: \"He tratado la 057717 con antibiótico\"\n• Muertes: \"Se ha muerto la cabra 057600\"\n• Cambios de lote: \"Mueve la 056749 al Lote 4\"\n\n**Por CSV:** Producción FLM, Paridera, Tratamientos, Anotaciones" }]);
   const [ld, setLd] = useState(false);
   const [fileName, setFileName] = useState(null);
   const [fileData, setFileData] = useState(null);
   const [rawRows, setRawRows] = useState(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
-  const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | null
+  const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | "paridera" | "tratamiento" | "inseminacion" | null
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
@@ -1511,6 +1511,236 @@ function ImportadorPage({ data, refresh, saveChat }) {
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 
+  // Import Paridera CSV — Format: FECHA;CROTAL;CABRITOS;MACHOS;HEMBRAS;PESETA;OBSERVACIONES
+  const importParidera = async (rows) => {
+    setImporting(true);
+    setImportResult(null);
+    
+    // Find header row
+    const headerIdx = rows.findIndex(r => normalizeText(r.join(" ")).includes("crotal") || normalizeText(r.join(" ")).includes("fecha"));
+    const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1) : rows.filter(r => r[1] && /\d{5,6}/.test(r[1].trim()));
+    
+    setMs(p => [...p, { role: "assistant", text: `📋 Importando paridera...\n${dataRows.length} filas detectadas` }]);
+
+    // Find or create paridera
+    const parideraName = fileName ? fileName.replace(/\.csv$/i, "").replace(/_/g, " ").trim() : "Paridera importada";
+    let paridera = data.parideras.find(p => normalizeText(p.nombre).includes(normalizeText(parideraName.split(" ")[1] || parideraName)));
+    if (!paridera) {
+      const { data: created } = await supabase.from("paridera").insert([{ nombre: parideraName }]).select().single();
+      paridera = created;
+    }
+
+    let partos = 0, abortos = 0, vacias = 0, crias = 0, errors = 0, skipped = 0;
+    const errorList = [];
+
+    for (const row of dataRows) {
+      try {
+        const fechaRaw = (row[0] || "").trim();
+        const crotal = (row[1] || "").trim();
+        if (!crotal || !/\d{5,6}/.test(crotal)) continue;
+        
+        const cabritos = parseInt(row[2]) || 0;
+        const machos = parseInt(row[3]) || 0;
+        const hembras = parseInt(row[4]) || 0;
+        const peseta = (row[5] || "").trim();
+        const obs = (row[6] || "").trim().toLowerCase();
+
+        const cabra = data.cabras.find(c => c.crotal === crotal);
+        if (!cabra) { errorList.push(`${crotal}: no existe en el sistema`); errors++; continue; }
+
+        // Parse date (format: "DD MM YY" with variable spacing)
+        let fecha = null;
+        if (fechaRaw) {
+          const parts = fechaRaw.trim().split(/\s+/);
+          if (parts.length >= 3) {
+            const d = parseInt(parts[0]);
+            const mo = parseInt(parts[1]);
+            let y = parseInt(parts[2]);
+            if (y < 100) y += 2000;
+            if (d && mo && y) fecha = `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+          }
+        }
+
+        // Determine type
+        let tipo = "normal";
+        if (obs.includes("aborto") || obs.includes("prematuro")) tipo = "aborto";
+        else if (obs.includes("vacia")) tipo = "vacia";
+
+        if (tipo === "vacia") {
+          // Update cabra estado_ginecologico
+          await supabase.from("cabra").update({ estado_ginecologico: "vacia" }).eq("id", cabra.id);
+          vacias++;
+          continue;
+        }
+
+        // Check for duplicate parto (same cabra + same paridera)
+        const existing = data.partos.find(p => p.cabra?.crotal === crotal && p.paridera_id === paridera?.id);
+        if (existing) { skipped++; continue; }
+
+        // Insert parto
+        const { error: errP } = await supabase.from("parto").insert([{
+          cabra_id: cabra.id, paridera_id: paridera?.id, fecha,
+          tipo, num_crias: cabritos, num_machos: machos, num_hembras: hembras,
+          observaciones: obs,
+        }]);
+        if (errP) { errors++; errorList.push(`${crotal}: ${errP.message}`); continue; }
+        
+        if (tipo === "aborto") abortos++;
+        else partos++;
+
+        // Insert crías hembra with peseta
+        if (hembras > 0 && peseta && peseta !== "0") {
+          const pesetas = peseta.split(/\s+/).filter(p => p && p !== "0");
+          for (const pes of pesetas) {
+            await supabase.from("cria").insert([{
+              madre_id: cabra.id, peseta: pes.trim(), sexo: "hembra",
+              fecha_nacimiento: fecha, paridera_id: paridera?.id,
+            }]);
+            crias++;
+          }
+        }
+      } catch (err) {
+        errors++;
+        errorList.push(`${row[1]}: ${err.message}`);
+      }
+    }
+
+    setImportResult({ imported: partos + abortos, errors, errorList, total: dataRows.length, tipo: "paridera" });
+    setImporting(false);
+    refresh();
+
+    let chatMsg = `✅ Paridera importada:\n• ${partos} partos normales\n• ${abortos} abortos\n• ${vacias} vacías\n• ${crias} crías hembra registradas`;
+    if (skipped > 0) chatMsg += `\n• ⏭️ ${skipped} ya existían (no duplicados)`;
+    if (errors > 0) chatMsg += `\n• 🔴 ${errors} errores:\n${errorList.slice(0, 5).map(e => `  - ${e}`).join("\n")}`;
+    setMs(p => [...p, { role: "assistant", text: chatMsg }]);
+  };
+
+  // Import Tratamiento CSV — Format: CROTAL;TIPO;PRODUCTO;FECHA;OBSERVACIONES (flexible)
+  const importTratamiento = async (rows) => {
+    setImporting(true);
+    setImportResult(null);
+
+    const header = rows[0];
+    const hNorm = header.map(h => normalizeText(h));
+    
+    // Find columns
+    const crotalCol = hNorm.findIndex(h => h.includes("crotal") || h.includes("animal"));
+    const tipoCol = hNorm.findIndex(h => h.includes("tipo") || h.includes("tratamiento"));
+    const productoCol = hNorm.findIndex(h => h.includes("producto") || h.includes("medicamento") || h.includes("vacuna"));
+    const fechaCol = hNorm.findIndex(h => h.includes("fecha"));
+    const notasCol = hNorm.findIndex(h => h.includes("nota") || h.includes("observ"));
+
+    if (crotalCol === -1) {
+      setMs(p => [...p, { role: "assistant", text: `🔴 No se encontró columna de crotal en el CSV. Columnas: ${header.join(", ")}` }]);
+      setImporting(false);
+      return;
+    }
+
+    const dataRows = rows.slice(1).filter(r => r[crotalCol]?.trim());
+    const today = new Date().toISOString().split("T")[0];
+    let imported = 0, errors = 0;
+    const errorList = [];
+
+    for (const row of dataRows) {
+      try {
+        const crotal = row[crotalCol].trim();
+        const cabra = data.cabras.find(c => c.crotal === crotal);
+        if (!cabra) { errorList.push(`${crotal}: no existe`); errors++; continue; }
+
+        const tipo = tipoCol >= 0 ? row[tipoCol]?.trim() || "general" : "general";
+        const producto = productoCol >= 0 ? row[productoCol]?.trim() || "" : "";
+        const fecha = fechaCol >= 0 ? row[fechaCol]?.trim() || today : today;
+        const notas = notasCol >= 0 ? row[notasCol]?.trim() || "" : "";
+
+        const { error } = await supabase.from("tratamiento").insert([{
+          cabra_id: cabra.id, fecha, tipo, producto, notas: notas || "CSV import",
+        }]);
+        if (error) { errors++; errorList.push(`${crotal}: ${error.message}`); }
+        else imported++;
+      } catch (err) {
+        errors++;
+      }
+    }
+
+    setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "tratamiento" });
+    setImporting(false);
+    refresh();
+
+    let chatMsg = `✅ Tratamientos importados: ${imported}/${dataRows.length}`;
+    if (errors > 0) chatMsg += `\n🔴 ${errors} errores:\n${errorList.slice(0, 5).map(e => `  - ${e}`).join("\n")}`;
+    setMs(p => [...p, { role: "assistant", text: chatMsg }]);
+  };
+
+  // Import Inseminación CSV — Format: CROTAL;FECHA;MACHO/DOSIS;PARIDERA;OBSERVACIONES (flexible)
+  const importInseminacion = async (rows) => {
+    setImporting(true);
+    setImportResult(null);
+
+    const header = rows[0];
+    const hNorm = header.map(h => normalizeText(h));
+
+    const crotalCol = hNorm.findIndex(h => h.includes("crotal") || h.includes("animal") || h.includes("cabra"));
+    const fechaCol = hNorm.findIndex(h => h.includes("fecha"));
+    const machoCol = hNorm.findIndex(h => h.includes("macho") || h.includes("dosis") || h.includes("semen") || h.includes("semental"));
+    const parideraCol = hNorm.findIndex(h => h.includes("paridera") || h.includes("lote") || h.includes("grupo"));
+    const notasCol = hNorm.findIndex(h => h.includes("nota") || h.includes("observ"));
+
+    if (crotalCol === -1) {
+      setMs(p => [...p, { role: "assistant", text: `🔴 No se encontró columna de crotal. Columnas: ${header.join(", ")}` }]);
+      setImporting(false);
+      return;
+    }
+
+    setMs(p => [...p, { role: "assistant", text: `📋 Importando inseminaciones...\nColumnas detectadas: crotal=${crotalCol >= 0 ? header[crotalCol] : "?"}, fecha=${fechaCol >= 0 ? header[fechaCol] : "?"}, macho=${machoCol >= 0 ? header[machoCol] : "?"}` }]);
+
+    const dataRows = rows.slice(1).filter(r => r[crotalCol]?.trim());
+    const today = new Date().toISOString().split("T")[0];
+    let imported = 0, errors = 0, skipped = 0;
+    const errorList = [];
+
+    for (const row of dataRows) {
+      try {
+        const crotal = row[crotalCol].trim();
+        const cabra = data.cabras.find(c => c.crotal === crotal);
+        if (!cabra) { errorList.push(`${crotal}: no existe`); errors++; continue; }
+
+        const fecha = fechaCol >= 0 ? row[fechaCol]?.trim() || today : today;
+        const machoInfo = machoCol >= 0 ? row[machoCol]?.trim() || "" : "";
+        const parideraInfo = parideraCol >= 0 ? row[parideraCol]?.trim() || "" : "";
+        const notas = notasCol >= 0 ? row[notasCol]?.trim() || "" : "";
+
+        // Check duplicate
+        const existing = data.cubriciones.find(c => c.cabra?.crotal === crotal && c.metodo === "inseminacion");
+        if (existing) { skipped++; continue; }
+
+        // Find paridera if mentioned
+        let paridera_id = null;
+        if (parideraInfo) {
+          const par = data.parideras.find(p => normalizeText(p.nombre).includes(normalizeText(parideraInfo)));
+          if (par) paridera_id = par.id;
+        }
+
+        const { error } = await supabase.from("cubricion").insert([{
+          cabra_id: cabra.id, fecha_entrada: fecha, metodo: "inseminacion",
+          paridera_id, notas: `${machoInfo} ${notas}`.trim() || "Inseminación CSV",
+        }]);
+        if (error) { errors++; errorList.push(`${crotal}: ${error.message}`); }
+        else imported++;
+      } catch (err) {
+        errors++;
+      }
+    }
+
+    setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "inseminacion" });
+    setImporting(false);
+    refresh();
+
+    let chatMsg = `✅ Inseminaciones importadas: ${imported}/${dataRows.length}`;
+    if (skipped > 0) chatMsg += `\n⏭️ ${skipped} ya existían (no duplicadas)`;
+    if (errors > 0) chatMsg += `\n🔴 ${errors} errores:\n${errorList.slice(0, 5).map(e => `  - ${e}`).join("\n")}`;
+    setMs(p => [...p, { role: "assistant", text: chatMsg }]);
+  };
+
   const readFile = async (file) => {
     setFileName(file.name);
     setImportResult(null);
@@ -1523,7 +1753,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
       setFileData({ "Datos": cleanRows.slice(0, 60) });
       
       setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${cleanRows.length} filas, ${cleanRows[0]?.length || 0} columnas)` }]);
-      setMs(p => [...p, { role: "assistant", text: `Archivo cargado. Selecciona el tipo de datos:\n• 🥛 **Producción FLM** — informe diario de ordeño\n• 📋 **Anotaciones veterinarias** — crotal + observación\n\nUsa los botones de abajo para elegir.` }]);
+      setMs(p => [...p, { role: "assistant", text: `Archivo cargado. Selecciona el tipo de datos:\n• 🥛 **Producción** — informe diario FLM\n• 🍼 **Paridera** — partos, abortos, vacías y crías\n• 💉 **Tratamientos** — vacunas, desparasitaciones, fertilidad\n• 🔬 **Inseminación** — registro de inseminaciones\n• 📋 **Anotaciones** — observaciones veterinarias\n\nUsa los botones de abajo para elegir.` }]);
     } catch (err) {
       setMs(p => [...p, { role: "assistant", text: `Error leyendo archivo: ${err.message}` }]);
     }
@@ -1542,6 +1772,96 @@ function ImportadorPage({ data, refresh, saveChat }) {
       const preview = rawRows.slice(0, 20).map(r => r.join(" | ")).join("\n");
       ctx += `\n\nARCHIVO: ${fileName}\n${preview}`;
     }
+
+    // Detect bulk treatment registration (vacunación, desparasitación, etc.)
+    const msgLow = userMsg.toLowerCase();
+    const treatmentPatterns = [
+      { keywords: ["vacuna", "vacunado", "vacunacion"], tipo: "vacunacion" },
+      { keywords: ["desparasit", "desparasitado"], tipo: "desparasitacion" },
+      { keywords: ["tratamiento", "tratado", "medicado"], tipo: "tratamiento" },
+      { keywords: ["implante", "esponja", "melovine"], tipo: "fertilidad" },
+      { keywords: ["antibiotico", "mamitis", "mastitis"], tipo: "antibiotico" },
+    ];
+    
+    const detectedTreat = treatmentPatterns.find(tp => tp.keywords.some(k => msgLow.includes(k)));
+    const loteMatch = msgLow.match(/lote\s*(\d+)/);
+    
+    if (detectedTreat && loteMatch) {
+      const loteNum = loteMatch[1];
+      const lote = data.lotes.find(l => l.nombre && l.nombre.includes(`Lote ${loteNum}`));
+      
+      if (lote) {
+        const cabrasLote = data.cabras.filter(c => c.lote_id === lote.id);
+        const producto = userMsg.replace(/[Hh]e |[Aa]l |[Dd]el |[Ee]ntero |[Ee]ntera |[Tt]odo |[Tt]oda /g, "").trim();
+        const today = new Date().toISOString().split("T")[0];
+        
+        // Insert treatments for all cabras in the lote
+        let ok = 0, err = 0;
+        for (const c of cabrasLote) {
+          const { error } = await supabase.from("tratamiento").insert([{
+            cabra_id: c.id, fecha: today, tipo: detectedTreat.tipo, producto: producto,
+            notas: `Tratamiento masivo ${lote.nombre} — registrado desde chat`,
+          }]);
+          if (error) err++;
+          else ok++;
+        }
+        
+        refresh();
+        setMs(p => [...p, { role: "assistant", text: `✅ **Registrado en la base de datos:**\n\n- **Tipo:** ${detectedTreat.tipo}\n- **Producto:** ${producto}\n- **Lote:** ${lote.nombre}\n- **Cabras tratadas:** ${ok}/${cabrasLote.length}\n- **Fecha:** ${today}${err > 0 ? `\n- ⚠️ ${err} errores` : ""}\n\nEsto queda guardado en el historial de cada cabra y se cruzará con los datos de producción y reproducción.` }]);
+        setLd(false);
+        return;
+      }
+    }
+
+    // Also detect individual cabra treatments
+    const crotalMatch = msgLow.match(/\b(\d{5,6})\b/);
+    if (detectedTreat && crotalMatch && !loteMatch) {
+      const crotal = crotalMatch[1];
+      const cabra = data.cabras.find(c => c.crotal === crotal);
+      if (cabra) {
+        const today = new Date().toISOString().split("T")[0];
+        const producto = userMsg.trim();
+        await supabase.from("tratamiento").insert([{
+          cabra_id: cabra.id, fecha: today, tipo: detectedTreat.tipo, producto: producto,
+          notas: "Registrado desde chat",
+        }]);
+        refresh();
+        setMs(p => [...p, { role: "assistant", text: `✅ **Tratamiento registrado:**\n- Cabra: ${crotal}\n- Tipo: ${detectedTreat.tipo}\n- Fecha: ${today}\n\nGuardado en el historial de la cabra.` }]);
+        setLd(false);
+        return;
+      }
+    }
+
+    // Detect death registration
+    if ((msgLow.includes("muerto") || msgLow.includes("muerta") || msgLow.includes("fallecido") || msgLow.includes("baja")) && crotalMatch) {
+      const crotal = crotalMatch[1];
+      const cabra = data.cabras.find(c => c.crotal === crotal);
+      if (cabra) {
+        const today = new Date().toISOString().split("T")[0];
+        await supabase.from("muerte").insert([{ cabra_id: cabra.id, fecha: today, causa: userMsg }]);
+        await supabase.from("cabra").update({ estado: "muerta", lote_id: null }).eq("id", cabra.id);
+        refresh();
+        setMs(p => [...p, { role: "assistant", text: `✅ **Baja registrada:**\n- Cabra: ${crotal}\n- Fecha: ${today}\n- Estado cambiado a "muerta"\n- Retirada del lote` }]);
+        setLd(false);
+        return;
+      }
+    }
+
+    // Detect lote change
+    if ((msgLow.includes("cambia") || msgLow.includes("mueve") || msgLow.includes("pasa") || msgLow.includes("mover")) && crotalMatch && loteMatch) {
+      const crotal = crotalMatch[1];
+      const loteNum = loteMatch[1];
+      const cabra = data.cabras.find(c => c.crotal === crotal);
+      const lote = data.lotes.find(l => l.nombre && l.nombre.includes(`Lote ${loteNum}`));
+      if (cabra && lote) {
+        await supabase.from("cabra").update({ lote_id: lote.id }).eq("id", cabra.id);
+        refresh();
+        setMs(p => [...p, { role: "assistant", text: `✅ **Cambio de lote:**\n- Cabra: ${crotal}\n- Nuevo lote: ${lote.nombre}\n\nActualizado en la base de datos.` }]);
+        setLd(false);
+        return;
+      }
+    }
+
     const response = await askClaude(userMsg, ctx);
     setMs(p => [...p, { role: "assistant", text: response }]);
     setLd(false);
@@ -1571,7 +1891,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
         {rawRows && !importResult && (
           <div style={{ marginTop: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#64748B", marginBottom: 8 }}>¿Qué tipo de datos contiene?</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               <button onClick={() => setCsvType("produccion")}
                 style={{
                   padding: "14px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer",
@@ -1579,7 +1899,34 @@ function ImportadorPage({ data, refresh, saveChat }) {
                   background: csvType === "produccion" ? "#F0FDF4" : "#FFF",
                   color: csvType === "produccion" ? "#059669" : "#64748B",
                 }}>
-                🥛 Producción FLM
+                🥛 Producción
+              </button>
+              <button onClick={() => setCsvType("paridera")}
+                style={{
+                  padding: "14px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  border: csvType === "paridera" ? "2px solid #DB2777" : "2px solid #E2E8F0",
+                  background: csvType === "paridera" ? "#FDF2F8" : "#FFF",
+                  color: csvType === "paridera" ? "#DB2777" : "#64748B",
+                }}>
+                🍼 Paridera
+              </button>
+              <button onClick={() => setCsvType("tratamiento")}
+                style={{
+                  padding: "14px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  border: csvType === "tratamiento" ? "2px solid #7C3AED" : "2px solid #E2E8F0",
+                  background: csvType === "tratamiento" ? "#F5F3FF" : "#FFF",
+                  color: csvType === "tratamiento" ? "#7C3AED" : "#64748B",
+                }}>
+                💉 Tratamientos
+              </button>
+              <button onClick={() => setCsvType("inseminacion")}
+                style={{
+                  padding: "14px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  border: csvType === "inseminacion" ? "2px solid #EA580C" : "2px solid #E2E8F0",
+                  background: csvType === "inseminacion" ? "#FFF7ED" : "#FFF",
+                  color: csvType === "inseminacion" ? "#EA580C" : "#64748B",
+                }}>
+                🔬 Inseminación
               </button>
               <button onClick={() => setCsvType("anotaciones")}
                 style={{
@@ -1588,7 +1935,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
                   background: csvType === "anotaciones" ? "#F0F9FF" : "#FFF",
                   color: csvType === "anotaciones" ? "#0891B2" : "#64748B",
                 }}>
-                📋 Anotaciones Vet
+                📋 Anotaciones
               </button>
             </div>
           </div>
@@ -1596,7 +1943,13 @@ function ImportadorPage({ data, refresh, saveChat }) {
 
         {/* Import button */}
         {canImport && !importResult && (
-          <button onClick={() => csvType === "produccion" ? importProduction(rawRows) : importAnotaciones(rawRows)} disabled={importing}
+          <button onClick={() => {
+            if (csvType === "produccion") importProduction(rawRows);
+            else if (csvType === "anotaciones") importAnotaciones(rawRows);
+            else if (csvType === "paridera") importParidera(rawRows);
+            else if (csvType === "tratamiento") importTratamiento(rawRows);
+            else if (csvType === "inseminacion") importInseminacion(rawRows);
+          }} disabled={importing}
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
               background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
             }}>
@@ -4174,7 +4527,7 @@ export default function App() {
               produccion: `Análisis productivo · ${data.produccion?.length || 0} registros · Alertas sanitarias`,
               sanidad: "Alertas, patrones, conductividad, anotaciones veterinarias, candidatas a descarte",
               rentabilidad: "Análisis financiero · Previsión de producción · Control de ingresos y gastos",
-              importador: "Sube CSV del FLM y se importa automáticamente a Supabase",
+              importador: "Importa CSV o registra tratamientos, muertes y cambios por chat",
               consultas: "Pregunta lo que quieras — respuestas con datos reales",
               anomalias: "Errores de gestión, cabras mal ubicadas, revisiones pendientes",
               guardados: `${(data.chatsGuardados || []).length} conversaciones guardadas`,

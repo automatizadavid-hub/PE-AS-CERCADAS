@@ -1265,13 +1265,13 @@ function ChatBox({ messages, input, setInput, onSend, examples, onExample, place
                   style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
-                  {"\uD83D\uDCC4"} PDF
+                  {"📄"} PDF
                 </button>
                 <button onClick={() => downloadExcel(m.text, messages[i - 1]?.text || "Consulta")} title="Descargar Excel"
                   style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
-                  {"\uD83D\uDCCA"} Excel
+                  {"📊"} Excel
                 </button>
               </div>
             )}
@@ -1388,9 +1388,9 @@ function CollapsibleSection({ summary, children }) {
       <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", background: "#FFF", userSelect: "none" }}
         onMouseEnter={e => e.currentTarget.style.background = "#FEF9EE"}
         onMouseLeave={e => e.currentTarget.style.background = "#FFF"}>
-        <span style={{ fontSize: 11, color: "#E8950A", transition: "transform .2s", transform: open ? "rotate(90deg)" : "none" }}>{"\u25B6"}</span>
+        <span style={{ fontSize: 11, color: "#E8950A", transition: "transform .2s", transform: open ? "rotate(90deg)" : "none" }}>{"▶"}</span>
         <span style={{ fontSize: 13, fontWeight: 700, color: "#E8950A" }}>{summary}</span>
-        <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: "auto" }}>{open ? "Cerrar" : "Ver m\u00e1s"}</span>
+        <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: "auto" }}>{open ? "Cerrar" : "Ver mas"}</span>
       </div>
       {open && (
         <div style={{ padding: "8px 14px 14px", borderTop: "1px solid #F1F5F9", background: "#FAFAFA" }}>
@@ -1652,20 +1652,20 @@ function DashboardPage({ data }) {
 
         return (
           <Card>
-            <SectionTitle icon="\uD83E\uDDE0" text="Inteligencia del D\u00eda" color="#7C3AED" />
+            <SectionTitle icon="🧠" text="Inteligencia del Día" color="#7C3AED" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
 
               {/* Tendencia global */}
               {tendencias.resumen && (
                 <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", marginBottom: 8 }}>\uD83D\uDCC8 Tendencia del Reba\u00f1o</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", marginBottom: 8 }}>{"📈"} Tendencia del Rebaño</div>
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                     <div style={{ fontSize: 22, fontWeight: 800, color: tendencias.resumen.cambioGlobal >= 0 ? "#059669" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>
                       {tendencias.resumen.cambioGlobal >= 0 ? "+" : ""}{tendencias.resumen.cambioGlobal.toFixed(1)}%
                     </div>
                     <div style={{ fontSize: 12, color: "#64748B", lineHeight: 1.5 }}>
                       Media: {tendencias.resumen.mediaHoy?.toFixed(2)}L/cabra<br />
-                      vs {tendencias.resumen.mediaAyer?.toFixed(2)}L d\u00eda anterior
+                      vs {tendencias.resumen.mediaAyer?.toFixed(2)}L dia anterior
                     </div>
                   </div>
                 </div>
@@ -1674,34 +1674,34 @@ function DashboardPage({ data }) {
               {/* Alertas criticas */}
               {criticas.length > 0 && (
                 <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 8 }}>\uD83D\uDD34 Cr\u00edticas ({criticas.length})</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 8 }}>{"🔴"} Criticas ({criticas.length})</div>
                   {criticas.slice(0, 5).map((t, i) => (
                     <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "4px 0", borderBottom: i < Math.min(criticas.length, 5) - 1 ? "1px solid #FEE2E2" : "none" }}>
                       <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
                       <span style={{ marginLeft: 8, color: "#64748B" }}>{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} — {t.detalle}</span>
                     </div>
                   ))}
-                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>+ {criticas.length - 5} m\u00e1s</div>}
+                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>+ {criticas.length - 5} mas</div>}
                 </div>
               )}
 
               {/* Reproductivo */}
               {(secadosUrg.length > 0 || ecosPend.length > 0 || partosNR.length > 0) && (
                 <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#EA580C", marginBottom: 8 }}>\uD83D\uDD04 Reproductivo</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#EA580C", marginBottom: 8 }}>{"🔄"} Reproductivo</div>
                   {secadosUrg.length > 0 && (
                     <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
-                      \u26A0\uFE0F <strong>{secadosUrg.length}</strong> secados urgentes: {secadosUrg.slice(0, 4).map(a => a.crotal).join(", ")}{secadosUrg.length > 4 ? "..." : ""}
+                      {"⚠️"} <strong>{secadosUrg.length}</strong> secados urgentes: {secadosUrg.slice(0, 4).map(a => a.crotal).join(", ")}{secadosUrg.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {ecosPend.length > 0 && (
                     <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
-                      \uD83D\uDD2C <strong>{ecosPend.length}</strong> ecograf\u00edas pendientes: {ecosPend.slice(0, 4).map(a => a.crotal).join(", ")}{ecosPend.length > 4 ? "..." : ""}
+                      {"🔬"} <strong>{ecosPend.length}</strong> ecografias pendientes: {ecosPend.slice(0, 4).map(a => a.crotal).join(", ")}{ecosPend.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {partosNR.length > 0 && (
                     <div style={{ fontSize: 12, color: "#DC2626", padding: "4px 0" }}>
-                      \uD83D\uDEA8 <strong>{partosNR.length}</strong> partos sin registrar: {partosNR.slice(0, 4).map(a => a.crotal).join(", ")}{partosNR.length > 4 ? "..." : ""}
+                      {"🚨"} <strong>{partosNR.length}</strong> partos sin registrar: {partosNR.slice(0, 4).map(a => a.crotal).join(", ")}{partosNR.length > 4 ? "..." : ""}
                     </div>
                   )}
                 </div>
@@ -1710,7 +1710,7 @@ function DashboardPage({ data }) {
               {/* Proximos eventos */}
               {proxEventos.length > 0 && (
                 <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#2563EB", marginBottom: 8 }}>\uD83D\uDCC5 Pr\u00f3ximos Eventos</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#2563EB", marginBottom: 8 }}>{"📅"} Proximos Eventos</div>
                   {proxEventos.map((e, i) => (
                     <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
                       <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 600 }}>{e.crotal}</span>
@@ -1724,15 +1724,15 @@ function DashboardPage({ data }) {
               {/* Declives + respuestas tratamiento */}
               {(declives.length > 0 || respuestas.length > 0) && (
                 <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 8 }}>\uD83D\uDCCA Tendencias Individuales</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 8 }}>{"📊"} Tendencias Individuales</div>
                   {declives.length > 0 && (
                     <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
-                      \uD83D\uDCC9 <strong>{declives.length}</strong> cabras en declive: {declives.slice(0, 4).map(t => t.crotal).join(", ")}{declives.length > 4 ? "..." : ""}
+                      {"📉"} <strong>{declives.length}</strong> cabras en declive: {declives.slice(0, 4).map(t => t.crotal).join(", ")}{declives.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {respuestas.length > 0 && (
                     <div style={{ fontSize: 12, color: "#059669", padding: "4px 0" }}>
-                      \u2705 <strong>{respuestas.length}</strong> respondiendo a tratamiento: {respuestas.slice(0, 4).map(t => t.crotal).join(", ")}{respuestas.length > 4 ? "..." : ""}
+                      {"✅"} <strong>{respuestas.length}</strong> respondiendo a tratamiento: {respuestas.slice(0, 4).map(t => t.crotal).join(", ")}{respuestas.length > 4 ? "..." : ""}
                     </div>
                   )}
                 </div>
@@ -1741,7 +1741,7 @@ function DashboardPage({ data }) {
               {/* Tratamientos con baja efectividad */}
               {tratsBajos.length > 0 && (
                 <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#D97706", marginBottom: 8 }}>\uD83D\uDC8A Tratamientos a Revisar</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#D97706", marginBottom: 8 }}>{"💊"} Tratamientos a Revisar</div>
                   {tratsBajos.map((t, i) => (
                     <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
                       <strong>{t.producto}</strong> ({t.tipo}): {t.tasaEfectividad}% efectividad ({t.efectivo}/{t.total} casos)
@@ -1753,11 +1753,11 @@ function DashboardPage({ data }) {
               {/* Ultimo resumen guardado */}
               {ultimoResumen && (
                 <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 8 }}>\uD83D\uDCBE \u00DAltima Importaci\u00f3n</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 8 }}>{"💾"} Ultima Importacion</div>
                   <div style={{ fontSize: 12, color: "#64748B" }}>
                     {new Date(ultimoResumen.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })} — {ultimoResumen.total_cabras} cabras, {ultimoResumen.litros_totales?.toFixed(0)}L totales
                   </div>
-                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas cr\u00edticas detectadas</div>}
+                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas criticas detectadas</div>}
                   {ultimoResumen.timeline_alertas > 0 && <div style={{ fontSize: 11, color: "#EA580C", marginTop: 2 }}>{ultimoResumen.timeline_alertas} alertas reproductivas</div>}
                 </div>
               )}
@@ -2937,22 +2937,22 @@ function ImportadorPage({ data, refresh, saveChat }) {
             )}
             {importResult.alertas && importResult.alertas.length > 0 && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>{"\uD83D\uDEA8"} Alertas ({importResult.alertas.length})</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>{"🚨"} Alertas ({importResult.alertas.length})</div>
                 {importResult.alertas.slice(0, 8).map((a, i) => (
                   <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0", borderBottom: "1px solid #F1F5F9" }}>{a.msg}</div>
                 ))}
-                {importResult.alertas.length > 8 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>...y {importResult.alertas.length - 8} m\u00e1s</div>}
+                {importResult.alertas.length > 8 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>...y {importResult.alertas.length - 8} mas</div>}
               </div>
             )}
             {/* === PANEL INTELIGENCIA POST-IMPORTACION === */}
             {importResult.hallazgos && (
               <div style={{ marginTop: 12, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 11, padding: "14px 16px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED", marginBottom: 10 }}>{"\uD83E\uDDE0"} An\u00e1lisis Autom\u00e1tico</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED", marginBottom: 10 }}>{"🧠"} Analisis Automatico</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginBottom: 10 }}>
                   {importResult.tendenciasCriticas > 0 && (
                     <div style={{ textAlign: "center", padding: "8px 6px", background: "#FEF2F2", borderRadius: 8, border: "1px solid #FECACA" }}>
                       <div style={{ fontSize: 18, fontWeight: 700, color: "#DC2626", fontFamily: "'Space Mono', monospace" }}>{importResult.tendenciasCriticas}</div>
-                      <div style={{ fontSize: 9.5, color: "#DC2626" }}>Alertas cr\u00edticas</div>
+                      <div style={{ fontSize: 9.5, color: "#DC2626" }}>Alertas criticas</div>
                     </div>
                   )}
                   {importResult.tendenciasTotal > 0 && (
@@ -2970,14 +2970,14 @@ function ImportadorPage({ data, refresh, saveChat }) {
                   {importResult.proximosEventos > 0 && (
                     <div style={{ textAlign: "center", padding: "8px 6px", background: "#EFF6FF", borderRadius: 8, border: "1px solid #BFDBFE" }}>
                       <div style={{ fontSize: 18, fontWeight: 700, color: "#2563EB", fontFamily: "'Space Mono', monospace" }}>{importResult.proximosEventos}</div>
-                      <div style={{ fontSize: 9.5, color: "#2563EB" }}>Eventos pr\u00f3ximos</div>
+                      <div style={{ fontSize: 9.5, color: "#2563EB" }}>Eventos proximos</div>
                     </div>
                   )}
                 </div>
                 {/* Detalle de hallazgos criticos */}
                 {importResult.hallazgos.tendencias && importResult.hallazgos.tendencias.filter(t => t.severidad === "alta").length > 0 && (
                   <div style={{ marginTop: 6 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", marginBottom: 4 }}>{"\uD83D\uDD34"} Requieren acci\u00f3n inmediata:</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", marginBottom: 4 }}>{"🔴"} Requieren accion inmediata:</div>
                     {importResult.hallazgos.tendencias.filter(t => t.severidad === "alta").slice(0, 5).map((t, i) => (
                       <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0" }}>
                         <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
@@ -2988,7 +2988,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
                 )}
                 {importResult.hallazgos.alertasReproductivas && importResult.hallazgos.alertasReproductivas.filter(a => a.severidad === "alta").length > 0 && (
                   <div style={{ marginTop: 6 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#EA580C", marginBottom: 4 }}>{"\uD83D\uDD04"} Reproductivo urgente:</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#EA580C", marginBottom: 4 }}>{"🔄"} Reproductivo urgente:</div>
                     {importResult.hallazgos.alertasReproductivas.filter(a => a.severidad === "alta").slice(0, 5).map((a, i) => (
                       <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0" }}>
                         <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#EA580C" }}>{a.crotal}</span>
@@ -3640,13 +3640,13 @@ function ConsultasPage({ data, saveChat }) {
                     style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
-                    {"\uD83D\uDCC4"} PDF
+                    {"📄"} PDF
                   </button>
                   <button onClick={() => downloadExcel(m.text, ms[i - 1]?.text || "Consulta")} title="Descargar Excel"
                     style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
-                    {"\uD83D\uDCCA"} Excel
+                    {"📊"} Excel
                   </button>
                 </div>
               )}
@@ -5414,13 +5414,13 @@ function GuardadosPage({ data, refresh }) {
                       style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
-                      {"\uD83D\uDCC4"} PDF
+                      {"📄"} PDF
                     </button>
                     <button onClick={() => downloadExcel(m.text, msgs[i - 1]?.text || "Consulta")} title="Descargar Excel"
                       style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
-                      {"\uD83D\uDCCA"} Excel
+                      {"📊"} Excel
                     </button>
                   </div>
                 )}

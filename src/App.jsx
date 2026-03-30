@@ -244,7 +244,7 @@ function useSupabaseData() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR, anotacionesR, alertasSanR, chatsR, anomaliasR] = await Promise.all([
+      const results = await Promise.allSettled([
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre), riia, id_electronico"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
@@ -265,9 +265,13 @@ function useSupabaseData() {
         supabase.from("anomalia_detectada").select("*").order("fecha", { ascending: false }).limit(300),
       ]);
 
+      const safeGet = (idx) => results[idx].status === "fulfilled" ? (results[idx].value.data || []) : [];
+      const failedTables = results.map((r, i) => r.status === "rejected" ? i : null).filter(i => i !== null);
+      if (failedTables.length > 0) console.warn("Tablas que fallaron al cargar:", failedTables);
+
       // Process lotes with counts
-      const cabras = cabrasR.data || [];
-      const lotes = (lotesR.data || []).map(l => ({
+      const cabras = safeGet(0);
+      const lotes = safeGet(1).map(l => ({
         ...l,
         cabras: cabras.filter(c => c.lote_id === l.id).length
       }));
@@ -275,22 +279,22 @@ function useSupabaseData() {
       setData({
         cabras,
         lotes,
-        partos: partosR.data || [],
-        ecografias: ecosR.data || [],
-        tratamientos: tratsR.data || [],
-        cubriciones: cubsR.data || [],
-        crias: criasR.data || [],
-        reglas: reglasR.data || [],
-        parideras: pariderasR.data || [],
-        muertes: muerteR.data || [],
-        protocolos: protocoloR.data || [],
-        eventos: eventosR.data || [],
-        produccion: produccionR.data || [],
-        resumenes: resumenR.data || [],
-        anotaciones: anotacionesR.data || [],
-        alertasSanitarias: alertasSanR.data || [],
-        chatsGuardados: chatsR.data || [],
-        anomalias: anomaliasR.data || [],
+        partos: safeGet(2),
+        ecografias: safeGet(3),
+        tratamientos: safeGet(4),
+        cubriciones: safeGet(5),
+        crias: safeGet(6),
+        reglas: safeGet(7),
+        parideras: safeGet(8),
+        muertes: safeGet(9),
+        protocolos: safeGet(10),
+        eventos: safeGet(11),
+        produccion: safeGet(12),
+        resumenes: safeGet(13),
+        anotaciones: safeGet(14),
+        alertasSanitarias: safeGet(15),
+        chatsGuardados: safeGet(16),
+        anomalias: safeGet(17),
       });
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -1218,6 +1222,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | "paridera" | "tratamiento" | "inseminacion" | null
+  const [pendingAction, setPendingAction] = useState(null); // { type, description, execute }
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
@@ -1402,9 +1407,13 @@ function ImportadorPage({ data, refresh, saveChat }) {
             }
           }
           if (newLote && cabra.lote_id !== newLote.id) {
+            const loteOrigenId = cabra.lote_id;
             const { error: errU } = await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
             if (errU) { errorList.push(`${crotal}: error actualizando lote — ${errU.message}`); }
-            else { loteChanges++; }
+            else {
+              loteChanges++;
+              await supabase.from("cambio_lote").insert([{ cabra_id: cabra.id, lote_origen_id: loteOrigenId, lote_destino_id: newLote.id, fecha: reportDate, motivo: "CSV produccion" }]);
+            }
           } else {
             const { error: errU } = await supabase.from("cabra").update({ dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
             if (errU) { errorList.push(`${crotal}: error actualizando cabra — ${errU.message}`); }
@@ -1446,9 +1455,10 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }], { onConflict: "fecha" });
 
     setImportResult({ imported, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "produccion.csv", tipo: "produccion", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
-    
+
     // Add result to chat
     let chatMsg = `✅ Importación completada:\n• ${imported}/${dataRows.length} registros de producción importados\n• ${totalLitros.toFixed(1)} litros totales hoy\n• ${loteChanges} cambios de lote detectados`;
     if (newCabras > 0) chatMsg += `\n• ${newCabras} cabras nuevas creadas`;
@@ -1501,6 +1511,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "anotaciones" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "anotaciones.csv", tipo: "anotaciones", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1606,6 +1617,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported: partos + abortos, errors, errorList, total: dataRows.length, tipo: "paridera" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "paridera.csv", tipo: "paridera", registros_procesados: partos + abortos, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1663,6 +1675,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "tratamiento" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "tratamientos.csv", tipo: "tratamiento", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1732,6 +1745,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "inseminacion" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "inseminacion.csv", tipo: "inseminacion", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1832,16 +1846,24 @@ function ImportadorPage({ data, refresh, saveChat }) {
       }
     }
 
-    // Detect death registration
+    // Detect death registration — requires confirmation
     if ((msgLow.includes("muerto") || msgLow.includes("muerta") || msgLow.includes("fallecido") || msgLow.includes("baja")) && crotalMatch) {
       const crotal = crotalMatch[1];
       const cabra = data.cabras.find(c => c.crotal === crotal);
       if (cabra) {
-        const today = new Date().toISOString().split("T")[0];
-        await supabase.from("muerte").insert([{ cabra_id: cabra.id, fecha: today, causa: userMsg }]);
-        await supabase.from("cabra").update({ estado: "muerta", lote_id: null }).eq("id", cabra.id);
-        refresh();
-        setMs(p => [...p, { role: "assistant", text: `✅ **Baja registrada:**\n- Cabra: ${crotal}\n- Fecha: ${today}\n- Estado cambiado a "muerta"\n- Retirada del lote` }]);
+        const loteNombre = data.lotes.find(l => l.id === cabra.lote_id)?.nombre || "Sin lote";
+        setPendingAction({
+          type: "muerte",
+          description: `Registrar baja/muerte de cabra ${crotal} (${loteNombre}, ${cabra.num_lactaciones || 0} lactaciones)`,
+          execute: async () => {
+            const today = new Date().toISOString().split("T")[0];
+            await supabase.from("muerte").insert([{ cabra_id: cabra.id, fecha: today, causa: userMsg, crotal: crotal }]);
+            await supabase.from("cabra").update({ estado: "muerta", lote_id: null }).eq("id", cabra.id);
+            refresh();
+            setMs(p => [...p, { role: "assistant", text: `✅ **Baja registrada:**\n- Cabra: ${crotal}\n- Fecha: ${today}\n- Estado cambiado a "muerta"\n- Retirada del lote\n- Registrado en historial` }]);
+          }
+        });
+        setMs(p => [...p, { role: "assistant", text: `⚠️ **Confirmar baja:**\n\nSe va a registrar la muerte de la cabra **${crotal}**.\n- Lote actual: ${loteNombre}\n- Lactaciones: ${cabra.num_lactaciones || 0}\n- Causa: "${userMsg}"\n\n**Esta accion es irreversible.** Pulsa "Confirmar" o "Cancelar".` }]);
         setLd(false);
         return;
       }
@@ -1854,9 +1876,12 @@ function ImportadorPage({ data, refresh, saveChat }) {
       const cabra = data.cabras.find(c => c.crotal === crotal);
       const lote = data.lotes.find(l => l.nombre && l.nombre.includes(`Lote ${loteNum}`));
       if (cabra && lote) {
+        const loteOrigenId = cabra.lote_id;
         await supabase.from("cabra").update({ lote_id: lote.id }).eq("id", cabra.id);
+        await supabase.from("cambio_lote").insert([{ cabra_id: cabra.id, lote_origen_id: loteOrigenId, lote_destino_id: lote.id, fecha: new Date().toISOString().split("T")[0], motivo: "Chat importador" }]);
         refresh();
-        setMs(p => [...p, { role: "assistant", text: `✅ **Cambio de lote:**\n- Cabra: ${crotal}\n- Nuevo lote: ${lote.nombre}\n\nActualizado en la base de datos.` }]);
+        const loteOrigenNombre = data.lotes.find(l => l.id === loteOrigenId)?.nombre || "Sin lote";
+        setMs(p => [...p, { role: "assistant", text: `✅ **Cambio de lote registrado:**\n- Cabra: ${crotal}\n- De: ${loteOrigenNombre}\n- A: ${lote.nombre}\n\nActualizado en la base de datos y registrado en historial.` }]);
         setLd(false);
         return;
       }
@@ -2029,6 +2054,15 @@ function ImportadorPage({ data, refresh, saveChat }) {
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
+        {pendingAction && (
+          <div style={{ background: "#FEF3C7", border: "2px solid #F59E0B", borderRadius: 12, padding: "14px 18px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ fontSize: 13, color: "#92400E", flex: 1 }}>⚠️ <strong>{pendingAction.description}</strong></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={async () => { await pendingAction.execute(); setPendingAction(null); }} style={{ background: "#DC2626", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Confirmar</button>
+              <button onClick={() => { setPendingAction(null); setMs(p => [...p, { role: "assistant", text: "Cancelado. No se ha registrado nada." }]); }} style={{ background: "#64748B", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Cancelar</button>
+            </div>
+          </div>
+        )}
         <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho o pregunta..." height={canImport ? 380 : 500} onSave={saveChat} pageName="importador" />
       </div>
     </div>

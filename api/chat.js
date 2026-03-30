@@ -96,11 +96,49 @@ Cuando te den ficha completa de una cabra, analiza TODO:
 - Precio leche: 1.31 euros/L
 
 FORMATO:
-- ## titulos, **negrita**, listas con -, emojis para alertas
+- ## titulos de seccion, **negrita**, listas con -, emojis para alertas
 - Esquematico, NO parrafos largos
+- Para TABLAS de datos (rankings, listas de cabras, comparaciones de 3+ cabras), usa formato markdown:
+  | Crotal | Litros | DEL | Lote |
+  |--------|--------|-----|------|
+  | 057997 | 4.2    | 145 | L1   |
+- Para secciones colapsables (detalles secundarios, listas >15 items), envuelve en:
+  <details>
+  <summary>Titulo de la seccion colapsable</summary>
+  contenido aqui
+  </details>
+- Prioriza tablas cuando hay datos comparables de 3+ cabras con campos comunes
+- Las alertas y recomendaciones van como texto normal, NO en tabla
 
 === ANOMALIAS ===
 Si ves una seccion "ANOMALIAS DETECTADAS" en los datos, SIEMPRE mencionalas al final de tu respuesta. Son errores humanos que el ganadero necesita saber.
+
+=== INTELIGENCIA AVANZADA ===
+
+TENDENCIAS DE PRODUCCION:
+- Si ves "MASTITIS_PROBABLE": caida brusca + conductividad alta = URGENTE, recomendar tratamiento
+- Si ves "CAIDA_BRUSCA": investigar causa (estres, alimentacion, enfermedad)
+- Si ves "DECLIVE": caida progresiva = posible agotamiento de lactacion o problema subclinico
+- Si ves "RESPUESTA_TRATAMIENTO": el tratamiento funciono, indicar que se ha confirmado
+
+EFECTIVIDAD DE TRATAMIENTOS:
+- Si ves porcentajes de efectividad por producto, usa esa info para recomendar tratamientos
+- Un producto con <50% efectividad deberia revisarse con el veterinario
+
+TIMELINE REPRODUCTIVO:
+- ECO_PENDIENTE: ecografia que deberia haberse hecho ya
+- SECADO_URGENTE: cabra gestante que deberia estar secandose ya
+- PARTO_NO_REGISTRADO: posible parto sin registrar o aborto silencioso
+- PARTO_PROXIMO / ECO_PROXIMA: eventos que vienen pronto, alertar al ganadero
+
+ESTACIONALIDAD (Murciano-Granadina en Valencia):
+- Produccion PICO: marzo-mayo (primavera)
+- Produccion VALLE: julio-septiembre (verano, calor)
+- Una caida del 10% en julio es NORMAL por calor
+- La misma caida en abril es ALARMA
+- Tiene en cuenta la epoca del anio al interpretar datos
+
+Cuando veas tendencias, SIEMPRE cruza con sanidad y reproduccion para dar hipotesis completas.
 
 ${chatType === 'finance' ? 'CONTEXTO FINANCIERO:\n- Gastos: 20-25k euros/mes (pienso 56%, personal 23%, vet 8%)\n- Precio leche: 1.31 euros/L\n' : ''}
 

@@ -119,68 +119,92 @@ function buildDataContext(data) {
     loteDEL[lote.nombre].dels.push({ crotal: c.crotal, del, litros: p?.litros || 0, cabra_id: c.id, conductividad: p?.conductividad || 0 });
   });
 
+  // Parametros configurables (data-driven en vez de hardcoded)
+  const UMBRAL_DEL_DIFF = 100;
+  const UMBRAL_SECADO_LITROS = 3.0;
+  const UMBRAL_RECIEN_PARIDAS_DEL = 150;
+  const UMBRAL_PARIENDO_DEL = 100;
+  const UMBRAL_GESTANTE_DEL_SECADO = 250;
+  const UMBRAL_ECO_OBSOLETA_DIAS = 90;
+
   Object.entries(loteDEL).forEach(([loteName, info]) => {
     if (info.dels.length < 3) return;
     const avgDEL = info.dels.reduce((s, d) => s + d.del, 0) / info.dels.length;
     const estado = info.lote.estado || 'produccion';
+    const tipo = info.lote.tipo || '';
 
     info.dels.forEach(d => {
-      // 1. DEL muy fuera de rango del lote (>100 días de diferencia con la media)
-      if (Math.abs(d.del - avgDEL) > 100 && d.del > 0) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName}: DEL=${d.del} (media lote=${Math.round(avgDEL)}). Diferencia de ${Math.abs(Math.round(d.del - avgDEL))} días — ¿debería estar en otro lote?`);
+      // 1. DEL muy fuera de rango del lote
+      if (Math.abs(d.del - avgDEL) > UMBRAL_DEL_DIFF && d.del > 0) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName}: DEL=${d.del} (media lote=${Math.round(avgDEL)}). Diferencia de ${Math.abs(Math.round(d.del - avgDEL))} dias — deberia estar en otro lote?`);
       }
 
-      // 2. Cabra en lote secándose pero con producción alta
-      if (estado === 'secandose' && d.litros > 3.0) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName} (SECÁNDOSE) pero produce ${d.litros.toFixed(1)}L — ¿seguro que debe secarse?`);
+      // 2. Cabra en lote secandose pero con produccion alta (data-driven: usa lote.estado)
+      if (estado === 'secandose' && d.litros > UMBRAL_SECADO_LITROS) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (SECANDOSE) pero produce ${d.litros.toFixed(1)}L — seguro que debe secarse?`);
       }
 
-      // 3. Cabra en lote de recién paridas con muchos DEL
-      if ((loteName.includes("Lote 5") || loteName.includes("Lote 13")) && d.del > 150) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName} (recién paridas) pero DEL=${d.del} — debería estar en Lote 1 o 4 para cubrición`);
+      // 3. Cabra en lote de recien paridas con muchos DEL (data-driven: usa lote.tipo o estado)
+      if ((tipo === 'recien_paridas' || estado === 'recien_paridas') && d.del > UMBRAL_RECIEN_PARIDAS_DEL) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (recien paridas) pero DEL=${d.del} — deberia pasar a cubricion`);
       }
 
-      // 4. Cabra en Lote 2 (pariendo) con muchos DEL
-      if (loteName.includes("Lote 2") && d.del > 100) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName} (pariendo) pero DEL=${d.del} — ¿ya parió y no se movió de lote?`);
+      // 4. Cabra en lote pariendo con muchos DEL (data-driven: usa lote.estado)
+      if (estado === 'pariendo' && d.del > UMBRAL_PARIENDO_DEL) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (pariendo) pero DEL=${d.del} — ya pario y no se movio de lote?`);
       }
     });
   });
 
-  // 5. Vacías del Lote 6 que no se han movido
-  const lote6 = data.lotes.find(l => l.nombre && l.nombre.includes("Lote 6"));
-  if (lote6) {
-    data.cabras.filter(c => c.lote_id === lote6.id).forEach(c => {
-      const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
-      if (ecos.length > 0) {
-        const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
-        if (lastEco.resultado === 'vacia') {
-          anomalias.push(`⚠️ ${c.crotal} sigue en Lote 6 pero última eco fue VACÍA (${lastEco.fecha}) — debería ir a cubrición. Error humano probable.`);
-        }
-      }
-    });
-  }
-
-  // 6. Cabras con ecografía gestante pero en lote de producción sin secado programado
+  // 5. Vacias con ultima eco vacia que no se han movido a cubricion (data-driven: busca por eco resultado, no por nombre lote)
   data.cabras.forEach(c => {
-    const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+    if (!c.lote_id || c.estado === "muerta" || c.estado === "baja") return;
+    const ecos = data.ecografias.filter(e => e.cabra_id === c.id || e.cabra?.crotal === c.crotal);
     if (ecos.length === 0) return;
     const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
-    const lote = data.lotes.find(l => l.id === c.lote_id);
-    if (lastEco.resultado === 'gestante' && lote && (lote.nombre.includes("Lote 1") || lote.nombre.includes("Lote 4"))) {
-      const p = prodById[c.id];
-      const del = p?.dia_lactacion || c.dias_en_leche || 0;
-      if (del > 250) {
-        anomalias.push(`⚠️ ${c.crotal} es GESTANTE (eco ${lastEco.fecha}) y sigue en ${lote.nombre} con DEL=${del} — ¿debería estar en proceso de secado?`);
+    if (lastEco.resultado === 'vacia') {
+      const lote = data.lotes.find(l => l.id === c.lote_id);
+      // Si esta en un lote que NO es de cubricion, deberia moverse
+      if (lote && lote.estado !== 'cubricion' && lote.tipo !== 'cubricion') {
+        anomalias.push(`⚠️ ${c.crotal} en ${lote.nombre}: ultima eco fue VACIA (${lastEco.fecha}) — deberia ir a cubricion`);
       }
     }
   });
 
-  // 7. Cabras sin lote asignado pero con producción
-  data.cabras.filter(c => !c.lote_id).forEach(c => {
+  // 6. Gestantes en lotes de produccion con DEL alto — necesitan secado
+  data.cabras.forEach(c => {
+    const ecos = data.ecografias.filter(e => e.cabra_id === c.id || e.cabra?.crotal === c.crotal);
+    if (ecos.length === 0) return;
+    const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    const lote = data.lotes.find(l => l.id === c.lote_id);
+    // Data-driven: cualquier lote en estado "produccion" (no solo Lote 1/4)
+    if (lastEco.resultado === 'gestante' && lote && (lote.estado === 'produccion' || !lote.estado)) {
+      const p = prodById[c.id];
+      const del = p?.dia_lactacion || c.dias_en_leche || 0;
+      if (del > UMBRAL_GESTANTE_DEL_SECADO) {
+        anomalias.push(`⚠️ ${c.crotal} es GESTANTE (eco ${lastEco.fecha}) y sigue en ${lote.nombre} con DEL=${del} — deberia estar en proceso de secado`);
+      }
+    }
+  });
+
+  // 7. Cabras sin lote asignado pero con produccion
+  data.cabras.filter(c => !c.lote_id && c.estado !== "muerta" && c.estado !== "baja").forEach(c => {
     const p = prodById[c.id];
     if (p && p.litros > 0) {
-      anomalias.push(`🔍 ${c.crotal} produce ${p.litros.toFixed(1)}L pero NO tiene lote asignado — asignar lote.`);
+      anomalias.push(`🔍 ${c.crotal} produce ${p.litros.toFixed(1)}L pero NO tiene lote asignado — asignar lote`);
+    }
+  });
+
+  // 8. NUEVO: Ecografia obsoleta — ultima eco hace >90 dias en cabras activas
+  data.cabras.forEach(c => {
+    if (c.estado === "muerta" || c.estado === "baja" || !c.lote_id) return;
+    const ecos = data.ecografias.filter(e => e.cabra_id === c.id || e.cabra?.crotal === c.crotal);
+    if (ecos.length === 0) return;
+    const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    const diasDesdeEco = Math.floor((new Date() - new Date(lastEco.fecha)) / 86400000);
+    if (diasDesdeEco > UMBRAL_ECO_OBSOLETA_DIAS) {
+      const lote = data.lotes.find(l => l.id === c.lote_id);
+      anomalias.push(`🔍 ${c.crotal} (${lote?.nombre || "Sin lote"}): ultima eco hace ${diasDesdeEco} dias (${lastEco.fecha}, resultado: ${lastEco.resultado}) — dato posiblemente obsoleto`);
     }
   });
 
@@ -188,8 +212,585 @@ function buildDataContext(data) {
     lines.push(`\n🔍 ANOMALÍAS DETECTADAS (${anomalias.length}) — posibles errores humanos o de gestión:`);
     anomalias.forEach(a => lines.push(`  ${a}`));
   }
-  
+
+  // === INTELIGENCIA FASE 2 ===
+
+  // Tendencias de produccion
+  const { tendencias, resumen: resTendencias } = analizarTendencias(data);
+  if (tendencias.length > 0) {
+    lines.push(`\n📈 TENDENCIAS DE PRODUCCION (${tendencias.length} alertas):`);
+    if (resTendencias) {
+      lines.push(`  Rebano: ${resTendencias.cambioGlobal >= 0 ? '+' : ''}${resTendencias.cambioGlobal.toFixed(1)}% vs dia anterior. ${resTendencias.cabrasEnDeclive} en declive. ${resTendencias.mastitisProbable} mastitis probables.`);
+    }
+    tendencias.slice(0, 15).forEach(t => {
+      lines.push(`  ${t.severidad === "alta" ? "🔴" : t.severidad === "media" ? "🟡" : "🟢"} ${t.tipo} ${t.crotal} (${t.lote}): ${t.detalle}${t.conductividad > 6.0 ? ` [cond: ${t.conductividad}]` : ""}`);
+    });
+  }
+
+  // Evaluacion de tratamientos
+  const { porProducto } = evaluarTratamientos(data);
+  const prodEntries = Object.values(porProducto).filter(p => p.total >= 2);
+  if (prodEntries.length > 0) {
+    lines.push(`\n💊 EFECTIVIDAD DE TRATAMIENTOS:`);
+    prodEntries.forEach(p => {
+      lines.push(`  ${p.tipo}/${p.producto}: ${p.tasaEfectividad}% efectivo (${p.efectivo}/${p.total} casos)`);
+    });
+  }
+
+  // Timeline reproductivo
+  const { alertas: alertasRepro, proximos } = calcularTimelineReproductivo(data);
+  if (alertasRepro.length > 0 || proximos.length > 0) {
+    lines.push(`\n🔄 TIMELINE REPRODUCTIVO:`);
+    if (alertasRepro.length > 0) {
+      lines.push(`  ⚠️ Alertas (${alertasRepro.length}):`);
+      alertasRepro.slice(0, 10).forEach(a => {
+        lines.push(`    ${a.severidad === "alta" ? "🔴" : "🟡"} ${a.tipo} ${a.crotal} (${a.lote}): ${a.detalle}`);
+      });
+    }
+    if (proximos.length > 0) {
+      lines.push(`  📅 Proximos eventos (${proximos.length}):`);
+      proximos.slice(0, 10).forEach(p => {
+        lines.push(`    ${p.tipo} ${p.crotal} (${p.lote}): ${p.detalle}`);
+      });
+    }
+  }
+
   return lines.join("\n");
+}
+
+// ==========================================
+// MOTOR DE INTELIGENCIA — Fase 2
+// ==========================================
+
+// 2.1 Analisis de tendencias de produccion
+function analizarTendencias(data) {
+  if (!data || !data.produccion || data.produccion.length === 0) return { tendencias: [], resumen: null };
+
+  const prod = data.produccion;
+  const fechas = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
+  if (fechas.length < 2) return { tendencias: [], resumen: null };
+
+  const tendencias = [];
+
+  // Agrupar produccion por cabra
+  const porCabra = {};
+  prod.forEach(p => {
+    if (!porCabra[p.cabra_id]) porCabra[p.cabra_id] = [];
+    porCabra[p.cabra_id].push(p);
+  });
+
+  // Para cada cabra con 3+ dias de datos
+  Object.entries(porCabra).forEach(([cabraId, registros]) => {
+    const sorted = registros.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    if (sorted.length < 3) return;
+
+    const cabra = data.cabras.find(c => c.id === parseInt(cabraId));
+    if (!cabra) return;
+    const lote = data.lotes.find(l => l.id === cabra.lote_id);
+    if (lote && lote.estado === "secandose") return; // Ignorar lotes secandose
+
+    const ultimos7 = sorted.slice(-7);
+    const ultimo = ultimos7[ultimos7.length - 1];
+    const penultimo = ultimos7.length >= 2 ? ultimos7[ultimos7.length - 2] : null;
+    const antepenultimo = ultimos7.length >= 3 ? ultimos7[ultimos7.length - 3] : null;
+
+    // Caida brusca: >25% en un dia, con produccion previa >0.5L
+    if (penultimo && penultimo.litros > 0.5 && ultimo.litros > 0) {
+      const cambio = ((ultimo.litros - penultimo.litros) / penultimo.litros) * 100;
+      if (cambio < -25) {
+        const condAlta = ultimo.conductividad > 6.0;
+        tendencias.push({
+          tipo: condAlta ? "MASTITIS_PROBABLE" : "CAIDA_BRUSCA",
+          crotal: cabra.crotal,
+          lote: lote?.nombre || "Sin lote",
+          detalle: `${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (${cambio.toFixed(0)}%)`,
+          conductividad: ultimo.conductividad,
+          severidad: condAlta ? "alta" : "media",
+          fechas: `${penultimo.fecha} -> ${ultimo.fecha}`,
+        });
+      }
+    }
+
+    // Declive progresivo: caida >15% en ultimos 3 registros
+    if (antepenultimo && antepenultimo.litros > 0.5) {
+      const cambio3d = ((ultimo.litros - antepenultimo.litros) / antepenultimo.litros) * 100;
+      if (cambio3d < -15 && ultimo.litros < penultimo.litros && penultimo.litros < antepenultimo.litros) {
+        const yaDetectada = tendencias.some(t => t.crotal === cabra.crotal && (t.tipo === "CAIDA_BRUSCA" || t.tipo === "MASTITIS_PROBABLE"));
+        if (!yaDetectada) {
+          tendencias.push({
+            tipo: "DECLIVE",
+            crotal: cabra.crotal,
+            lote: lote?.nombre || "Sin lote",
+            detalle: `${antepenultimo.litros.toFixed(1)}L -> ${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (${cambio3d.toFixed(0)}% en 3 dias)`,
+            conductividad: ultimo.conductividad,
+            severidad: "media",
+            fechas: `${antepenultimo.fecha} -> ${ultimo.fecha}`,
+          });
+        }
+      }
+    }
+
+    // Subida post-tratamiento: >30% subida + tratamiento en ultimos 7 dias
+    if (penultimo && penultimo.litros > 0.3) {
+      const subida = ((ultimo.litros - penultimo.litros) / penultimo.litros) * 100;
+      if (subida > 30) {
+        const tratReciente = (data.tratamientos || []).find(t =>
+          t.cabra_id === parseInt(cabraId) &&
+          t.fecha >= ultimos7[0].fecha
+        );
+        if (tratReciente) {
+          tendencias.push({
+            tipo: "RESPUESTA_TRATAMIENTO",
+            crotal: cabra.crotal,
+            lote: lote?.nombre || "Sin lote",
+            detalle: `${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (+${subida.toFixed(0)}%) tras ${tratReciente.tipo}: ${tratReciente.producto || "s/n"}`,
+            conductividad: ultimo.conductividad,
+            severidad: "info",
+            fechas: `${penultimo.fecha} -> ${ultimo.fecha}`,
+          });
+        }
+      }
+    }
+  });
+
+  // Tendencia global del rebano
+  const resumen = {};
+  if (fechas.length >= 2) {
+    const dia1 = prod.filter(p => p.fecha === fechas[0]);
+    const dia2 = prod.filter(p => p.fecha === fechas[1]);
+    const total1 = dia1.reduce((s, p) => s + (p.litros || 0), 0);
+    const total2 = dia2.reduce((s, p) => s + (p.litros || 0), 0);
+    const media1 = dia1.length > 0 ? total1 / dia1.length : 0;
+    const media2 = dia2.length > 0 ? total2 / dia2.length : 0;
+    resumen.mediaHoy = media1;
+    resumen.mediaAyer = media2;
+    resumen.cambioGlobal = media2 > 0 ? ((media1 - media2) / media2 * 100) : 0;
+    resumen.cabrasEnDeclive = tendencias.filter(t => t.tipo === "DECLIVE" || t.tipo === "CAIDA_BRUSCA").length;
+    resumen.mastitisProbable = tendencias.filter(t => t.tipo === "MASTITIS_PROBABLE").length;
+    resumen.respuestasTratamiento = tendencias.filter(t => t.tipo === "RESPUESTA_TRATAMIENTO").length;
+  }
+
+  return { tendencias: tendencias.sort((a, b) => (a.severidad === "alta" ? 0 : 1) - (b.severidad === "alta" ? 0 : 1)), resumen };
+}
+
+// 2.2 Correlacion tratamiento -> resultado
+function evaluarTratamientos(data) {
+  if (!data || !data.tratamientos || data.tratamientos.length === 0) return { evaluaciones: [], porProducto: {} };
+
+  const prod = data.produccion || [];
+  const evaluaciones = [];
+
+  data.tratamientos.forEach(trat => {
+    if (!trat.cabra_id || !trat.fecha) return;
+    const cabra = data.cabras.find(c => c.id === trat.cabra_id);
+    if (!cabra) return;
+
+    const prodCabra = prod.filter(p => p.cabra_id === trat.cabra_id).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    if (prodCabra.length < 3) return;
+
+    // Produccion 7 dias antes del tratamiento
+    const antes = prodCabra.filter(p => p.fecha < trat.fecha).slice(-7);
+    // Produccion 7 dias despues del tratamiento
+    const despues = prodCabra.filter(p => p.fecha > trat.fecha).slice(0, 7);
+
+    if (antes.length < 2 || despues.length < 2) return;
+
+    const mediaAntes = antes.reduce((s, p) => s + (p.litros || 0), 0) / antes.length;
+    const mediaDespues = despues.reduce((s, p) => s + (p.litros || 0), 0) / despues.length;
+    const condAntes = antes.reduce((s, p) => s + (p.conductividad || 0), 0) / antes.length;
+    const condDespues = despues.reduce((s, p) => s + (p.conductividad || 0), 0) / despues.length;
+
+    const cambioProd = mediaAntes > 0 ? ((mediaDespues - mediaAntes) / mediaAntes * 100) : 0;
+    const cambioCond = condAntes > 0 ? ((condDespues - condAntes) / condAntes * 100) : 0;
+
+    let resultado = "sin_cambio";
+    if (cambioProd > 10 || cambioCond < -10) resultado = "efectivo";
+    else if (cambioProd < -10 || cambioCond > 10) resultado = "ineficaz";
+
+    evaluaciones.push({
+      crotal: cabra.crotal,
+      tipo: trat.tipo,
+      producto: trat.producto || "Sin especificar",
+      fecha: trat.fecha,
+      mediaAntes: mediaAntes.toFixed(2),
+      mediaDespues: mediaDespues.toFixed(2),
+      cambioProd: cambioProd.toFixed(1),
+      condAntes: condAntes.toFixed(2),
+      condDespues: condDespues.toFixed(2),
+      cambioCond: cambioCond.toFixed(1),
+      resultado,
+    });
+  });
+
+  // Agregar por producto
+  const porProducto = {};
+  evaluaciones.forEach(e => {
+    const key = `${e.tipo}:${e.producto}`;
+    if (!porProducto[key]) porProducto[key] = { tipo: e.tipo, producto: e.producto, total: 0, efectivo: 0, ineficaz: 0, sin_cambio: 0 };
+    porProducto[key].total++;
+    porProducto[key][e.resultado]++;
+  });
+
+  // Calcular tasa de efectividad
+  Object.values(porProducto).forEach(p => {
+    p.tasaEfectividad = p.total > 0 ? Math.round(p.efectivo / p.total * 100) : 0;
+  });
+
+  return { evaluaciones, porProducto };
+}
+
+// 2.3 Timeline reproductivo automatico
+function calcularTimelineReproductivo(data) {
+  if (!data) return { alertas: [], proximos: [] };
+
+  const hoy = new Date();
+  const hoyStr = hoy.toISOString().split("T")[0];
+  const alertas = [];
+  const proximos = [];
+
+  // Para cada cubricion, calcular fechas esperadas
+  (data.cubriciones || []).forEach(cub => {
+    if (!cub.fecha_entrada) return;
+    const cabra = data.cabras.find(c => c.id === cub.cabra_id);
+    if (!cabra || cabra.estado === "muerta" || cabra.estado === "baja") return;
+
+    const fechaCub = new Date(cub.fecha_entrada);
+    const fechaEcoEsperada = new Date(fechaCub); fechaEcoEsperada.setDate(fechaEcoEsperada.getDate() + 65);
+    const fechaPartoEsperado = new Date(fechaCub); fechaPartoEsperado.setDate(fechaPartoEsperado.getDate() + 150);
+    const fechaSecado = new Date(fechaPartoEsperado); fechaSecado.setDate(fechaSecado.getDate() - 60);
+
+    const fechaEcoStr = fechaEcoEsperada.toISOString().split("T")[0];
+    const fechaPartoStr = fechaPartoEsperado.toISOString().split("T")[0];
+    const fechaSecadoStr = fechaSecado.toISOString().split("T")[0];
+
+    // Verificar si ya tiene ecografia posterior a la cubricion
+    const tieneEco = (data.ecografias || []).some(e =>
+      e.cabra_id === cub.cabra_id && e.fecha >= cub.fecha_entrada
+    );
+
+    // Verificar si ya tiene parto posterior a la cubricion
+    const tieneParto = (data.partos || []).some(p =>
+      p.cabra_id === cub.cabra_id && p.fecha >= cub.fecha_entrada
+    );
+
+    const lote = data.lotes.find(l => l.id === cabra.lote_id);
+    const crotal = cabra.crotal;
+    const loteNombre = lote?.nombre || "Sin lote";
+
+    // Ecografia pendiente
+    if (!tieneEco && hoyStr >= fechaEcoStr) {
+      const diasRetraso = Math.floor((hoy - fechaEcoEsperada) / 86400000);
+      alertas.push({
+        tipo: "ECO_PENDIENTE",
+        crotal,
+        lote: loteNombre,
+        detalle: `Cubricion ${cub.fecha_entrada}, eco esperada ${fechaEcoStr} (${diasRetraso} dias de retraso)`,
+        severidad: diasRetraso > 15 ? "alta" : "media",
+        fechaEsperada: fechaEcoStr,
+      });
+    }
+
+    // Ecografia proxima (en los proximos 15 dias)
+    if (!tieneEco && hoyStr < fechaEcoStr) {
+      const diasHasta = Math.floor((fechaEcoEsperada - hoy) / 86400000);
+      if (diasHasta <= 15) {
+        proximos.push({ tipo: "ECO_PROXIMA", crotal, lote: loteNombre, fecha: fechaEcoStr, diasHasta, detalle: `Eco en ${diasHasta} dias` });
+      }
+    }
+
+    // Secado urgente — verificar si ya paso la fecha y sigue en produccion
+    if (!tieneParto && hoyStr >= fechaSecadoStr) {
+      const enProduccion = lote && (lote.estado === "produccion" || !lote.estado);
+      if (enProduccion) {
+        const diasRetraso = Math.floor((hoy - fechaSecado) / 86400000);
+        alertas.push({
+          tipo: "SECADO_URGENTE",
+          crotal,
+          lote: loteNombre,
+          detalle: `Parto esperado ${fechaPartoStr}, secado debio empezar ${fechaSecadoStr} (${diasRetraso} dias de retraso)`,
+          severidad: "alta",
+          fechaEsperada: fechaSecadoStr,
+        });
+      }
+    }
+
+    // Parto proximo (en los proximos 30 dias)
+    if (!tieneParto && hoyStr < fechaPartoStr) {
+      const diasHasta = Math.floor((fechaPartoEsperado - hoy) / 86400000);
+      if (diasHasta <= 30) {
+        proximos.push({ tipo: "PARTO_PROXIMO", crotal, lote: loteNombre, fecha: fechaPartoStr, diasHasta, detalle: `Parto en ~${diasHasta} dias` });
+      }
+    }
+
+    // Parto no registrado — deberia haber parido pero no hay registro
+    if (!tieneParto && hoyStr > fechaPartoStr) {
+      const diasRetraso = Math.floor((hoy - fechaPartoEsperado) / 86400000);
+      if (diasRetraso > 7) {
+        alertas.push({
+          tipo: "PARTO_NO_REGISTRADO",
+          crotal,
+          lote: loteNombre,
+          detalle: `Parto esperado ${fechaPartoStr}, ${diasRetraso} dias sin registro. Posible parto no registrado o aborto.`,
+          severidad: diasRetraso > 20 ? "alta" : "media",
+          fechaEsperada: fechaPartoStr,
+        });
+      }
+    }
+  });
+
+  return {
+    alertas: alertas.sort((a, b) => (a.severidad === "alta" ? 0 : 1) - (b.severidad === "alta" ? 0 : 1)),
+    proximos: proximos.sort((a, b) => a.diasHasta - b.diasHasta)
+  };
+}
+
+// ==========================================
+// MESSAGE PARSING & EXPORT UTILITIES
+// ==========================================
+
+function extractMarkdownTables(text) {
+  const lines = text.split("\n");
+  const tables = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (line.startsWith("|") && line.endsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      if (tableLines.length >= 2) {
+        const parseRow = (row) => row.split("|").slice(1, -1).map(c => c.trim());
+        const headers = parseRow(tableLines[0]);
+        const isSep = (row) => parseRow(row).every(c => /^[-:]+$/.test(c));
+        const startIdx = isSep(tableLines[1]) ? 2 : 1;
+        const rows = tableLines.slice(startIdx).map(parseRow);
+        if (rows.length > 0) tables.push({ headers, rows });
+      }
+    } else {
+      i++;
+    }
+  }
+  return tables;
+}
+
+function parseMessageStructure(text) {
+  if (!text) return [];
+  const lines = text.split("\n");
+  const blocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Table block
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      if (tableLines.length >= 2) {
+        const parseRow = (row) => row.split("|").slice(1, -1).map(c => c.trim());
+        const headers = parseRow(tableLines[0]);
+        const isSep = (row) => parseRow(row).every(c => /^[-:]+$/.test(c));
+        const startIdx = isSep(tableLines[1]) ? 2 : 1;
+        const rows = tableLines.slice(startIdx).map(parseRow);
+        if (rows.length > 0) blocks.push({ type: "table", headers, rows });
+      }
+      continue;
+    }
+
+    // Collapsible block
+    if (trimmed === "<details>" || trimmed.startsWith("<details>")) {
+      i++;
+      let summary = "";
+      if (i < lines.length) {
+        const sumLine = lines[i].trim();
+        const sumMatch = sumLine.match(/<summary>(.*?)<\/summary>/);
+        if (sumMatch) { summary = sumMatch[1]; i++; }
+      }
+      const innerLines = [];
+      while (i < lines.length && !lines[i].trim().startsWith("</details>")) {
+        innerLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++; // skip </details>
+      blocks.push({ type: "collapsible", summary, children: parseMessageStructure(innerLines.join("\n")) });
+      continue;
+    }
+
+    // Section header
+    if (trimmed.startsWith("## ")) {
+      const title = trimmed.replace(/^## /, "");
+      const children = [];
+      i++;
+      while (i < lines.length) {
+        const next = lines[i].trim();
+        if (next.startsWith("## ") || next === "<details>" || next.startsWith("<details>")) break;
+        if (next.startsWith("|") && next.endsWith("|")) break;
+        if (next === "") { i++; continue; }
+        const isList = next.startsWith("- ") || next.startsWith("\u2022 ");
+        const lineText = isList ? next.replace(/^[-\u2022]\s+/, "") : next;
+        children.push({
+          type: "line", text: lineText, isList,
+          isAlert: /[\u26A0\uFE0F]|\uD83D\uDD34|ALERTA|URGENTE/.test(next),
+          isPositive: /\u2705|ESTRELLA|IDEAL/.test(next),
+        });
+        i++;
+      }
+      blocks.push({ type: "section", title, children });
+      continue;
+    }
+
+    // Regular line
+    if (trimmed !== "") {
+      const isList = trimmed.startsWith("- ") || trimmed.startsWith("\u2022 ");
+      const lineText = isList ? trimmed.replace(/^[-\u2022]\s+/, "") : trimmed;
+      blocks.push({
+        type: "line", text: lineText, isList,
+        isAlert: /[\u26A0\uFE0F]|\uD83D\uDD34|ALERTA|URGENTE/.test(trimmed),
+        isPositive: /\u2705|ESTRELLA|IDEAL/.test(trimmed),
+      });
+    }
+    i++;
+  }
+  return blocks;
+}
+
+// PDF generation
+function generatePrintableHTML(text, queryTitle) {
+  const blocks = parseMessageStructure(text);
+  const fecha = new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
+
+  function renderBold(str) {
+    return str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function blocksToHTML(blks) {
+    return blks.map(b => {
+      if (b.type === "section") {
+        return `<h2 style="color:#1E293B;border-bottom:2px solid #E8950A;padding-bottom:6px;margin-top:18px;font-size:16px;">${renderBold(b.title)}</h2>` +
+          blocksToHTML(b.children);
+      }
+      if (b.type === "table") {
+        let html = '<div style="overflow-x:auto;margin:10px 0;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
+        html += "<tr>" + b.headers.map(h => `<th style="background:#E8950A;color:#FFF;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;">${renderBold(h)}</th>`).join("") + "</tr>";
+        b.rows.forEach((row, ri) => {
+          const bg = ri % 2 === 0 ? "#FFF" : "#F8FAFC";
+          html += "<tr>" + row.map(c => {
+            const isNum = /^\d/.test(c.trim());
+            return `<td style="border:1px solid #E2E8F0;padding:6px 10px;background:${bg};${isNum ? "text-align:right;font-family:monospace;" : ""}">${renderBold(c)}</td>`;
+          }).join("") + "</tr>";
+        });
+        html += "</table></div>";
+        return html;
+      }
+      if (b.type === "collapsible") {
+        return `<div style="margin:10px 0;border:1px solid #E2E8F0;border-radius:6px;padding:10px 14px;"><h3 style="color:#E8950A;font-size:14px;margin:0 0 8px 0;">${renderBold(b.summary)}</h3>` +
+          blocksToHTML(b.children) + "</div>";
+      }
+      if (b.type === "line") {
+        let style = "font-size:13px;line-height:1.6;margin:2px 0;";
+        if (b.isAlert) style += "background:#FEF2F2;border-left:3px solid #DC2626;padding:4px 10px;color:#991B1B;border-radius:4px;";
+        else if (b.isPositive) style += "background:#F0FDF4;border-left:3px solid #059669;padding:4px 10px;color:#065F46;border-radius:4px;";
+        else if (b.isList) style += "padding-left:16px;";
+        const prefix = b.isList ? '<span style="color:#E8950A;margin-right:6px;">\u203A</span>' : "";
+        return `<div style="${style}">${prefix}${renderBold(b.text)}</div>`;
+      }
+      return "";
+    }).join("\n");
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>PE\u00d1AS CERCADAS - ${queryTitle.substring(0, 60)}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 40px; color: #1E293B; }
+  @media print {
+    body { margin: 20px; }
+    table { page-break-inside: auto; }
+    tr { page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+  }
+</style></head><body>
+<div style="text-align:center;border-bottom:3px solid #E8950A;padding-bottom:16px;margin-bottom:20px;">
+  <div style="font-size:26px;font-weight:bold;color:#1E293B;">PE\u00d1AS CERCADAS</div>
+  <div style="font-size:13px;color:#64748B;">Ganader\u00eda Caprina Murciano-Granadina</div>
+  <div style="font-size:12px;color:#94A3B8;margin-top:4px;">${fecha}</div>
+</div>
+<div style="background:#FEF9EE;border:1px solid #FDE68A;border-radius:8px;padding:10px 16px;margin-bottom:20px;">
+  <div style="font-size:11px;color:#92400E;font-weight:600;">CONSULTA:</div>
+  <div style="font-size:14px;color:#1E293B;">${queryTitle.length > 200 ? queryTitle.substring(0, 200) + "..." : queryTitle}</div>
+</div>
+${blocksToHTML(blocks)}
+<div style="margin-top:30px;border-top:1px solid #E2E8F0;padding-top:10px;font-size:10px;color:#94A3B8;text-align:center;">
+  Generado por PE\u00d1AS CERCADAS \u2014 Sistema de Gesti\u00f3n Ganadera Inteligente \u2014 ${fecha}
+</div>
+</body></html>`;
+}
+
+function downloadPDF(messageText, queryTitle) {
+  const html = generatePrintableHTML(messageText, queryTitle);
+  const w = window.open("", "_blank", "width=800,height=600");
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => { w.print(); }, 400);
+}
+
+function downloadExcel(messageText, queryTitle) {
+  const tables = extractMarkdownTables(messageText);
+  const fecha = new Date().toLocaleDateString("es-ES");
+  let content, filename, mimeType;
+
+  if (tables.length > 0) {
+    let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>';
+    html += `<h2>PE\u00d1AS CERCADAS</h2><p>${fecha} \u2014 ${queryTitle.substring(0, 100)}</p>`;
+    tables.forEach((t, ti) => {
+      if (ti > 0) html += "<br/>";
+      html += '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;">';
+      html += "<tr>" + t.headers.map(h => `<th style="background:#E8950A;color:#FFF;font-weight:bold;">${h}</th>`).join("") + "</tr>";
+      t.rows.forEach(row => {
+        html += "<tr>" + row.map(c => `<td>${c}</td>`).join("") + "</tr>";
+      });
+      html += "</table>";
+    });
+    html += "</body></html>";
+    content = html;
+    filename = `penas-cercadas-${fecha.replace(/\//g, "-")}.xls`;
+    mimeType = "application/vnd.ms-excel";
+  } else {
+    // CSV fallback for text-only responses
+    const blocks = parseMessageStructure(messageText);
+    let csv = "\uFEFF"; // BOM for Excel UTF-8
+    csv += `"PE\u00d1AS CERCADAS - ${fecha}"\n`;
+    csv += `"Consulta: ${queryTitle.replace(/"/g, '""').substring(0, 200)}"\n\n`;
+    csv += '"Seccion","Contenido"\n';
+    let currentSection = "General";
+    blocks.forEach(b => {
+      if (b.type === "section") {
+        currentSection = b.title.replace(/"/g, '""');
+        b.children.forEach(c => {
+          if (c.type === "line") csv += `"${currentSection}","${c.text.replace(/\*\*/g, "").replace(/"/g, '""')}"\n`;
+        });
+      } else if (b.type === "line") {
+        csv += `"${currentSection}","${b.text.replace(/\*\*/g, "").replace(/"/g, '""')}"\n`;
+      }
+    });
+    content = csv;
+    filename = `penas-cercadas-${fecha.replace(/\//g, "-")}.csv`;
+    mimeType = "text/csv;charset=utf-8";
+  }
+
+  const blob = new Blob([content], { type: mimeType });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 }
 
 // ==========================================
@@ -244,7 +845,7 @@ function useSupabaseData() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cabrasR, lotesR, partosR, ecosR, tratsR, cubsR, criasR, reglasR, pariderasR, muerteR, protocoloR, eventosR, produccionR, resumenR, anotacionesR, alertasSanR, chatsR, anomaliasR] = await Promise.all([
+      const results = await Promise.allSettled([
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre), riia, id_electronico"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
@@ -265,9 +866,13 @@ function useSupabaseData() {
         supabase.from("anomalia_detectada").select("*").order("fecha", { ascending: false }).limit(300),
       ]);
 
+      const safeGet = (idx) => results[idx].status === "fulfilled" ? (results[idx].value.data || []) : [];
+      const failedTables = results.map((r, i) => r.status === "rejected" ? i : null).filter(i => i !== null);
+      if (failedTables.length > 0) console.warn("Tablas que fallaron al cargar:", failedTables);
+
       // Process lotes with counts
-      const cabras = cabrasR.data || [];
-      const lotes = (lotesR.data || []).map(l => ({
+      const cabras = safeGet(0);
+      const lotes = safeGet(1).map(l => ({
         ...l,
         cabras: cabras.filter(c => c.lote_id === l.id).length
       }));
@@ -275,22 +880,22 @@ function useSupabaseData() {
       setData({
         cabras,
         lotes,
-        partos: partosR.data || [],
-        ecografias: ecosR.data || [],
-        tratamientos: tratsR.data || [],
-        cubriciones: cubsR.data || [],
-        crias: criasR.data || [],
-        reglas: reglasR.data || [],
-        parideras: pariderasR.data || [],
-        muertes: muerteR.data || [],
-        protocolos: protocoloR.data || [],
-        eventos: eventosR.data || [],
-        produccion: produccionR.data || [],
-        resumenes: resumenR.data || [],
-        anotaciones: anotacionesR.data || [],
-        alertasSanitarias: alertasSanR.data || [],
-        chatsGuardados: chatsR.data || [],
-        anomalias: anomaliasR.data || [],
+        partos: safeGet(2),
+        ecografias: safeGet(3),
+        tratamientos: safeGet(4),
+        cubriciones: safeGet(5),
+        crias: safeGet(6),
+        reglas: safeGet(7),
+        parideras: safeGet(8),
+        muertes: safeGet(9),
+        protocolos: safeGet(10),
+        eventos: safeGet(11),
+        produccion: safeGet(12),
+        resumenes: safeGet(13),
+        anotaciones: safeGet(14),
+        alertasSanitarias: safeGet(15),
+        chatsGuardados: safeGet(16),
+        anomalias: safeGet(17),
       });
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -500,6 +1105,65 @@ function CabraHistorialModal({ crotal, data, onClose }) {
             </div>
           </div>
 
+          {/* Intelligence Scores */}
+          {(() => {
+            // Score de salud: conductividad media + tratamientos recientes
+            const condMedia = prod.length > 0 ? prod.slice(0, 10).reduce((s, p) => s + (p.conductividad || 0), 0) / Math.min(prod.length, 10) : 0;
+            const tratRecientes = trats.filter(t => { const d = new Date(t.fecha); return (new Date() - d) < 90 * 86400000; }).length;
+            const scoreSalud = Math.max(0, Math.min(100, 100 - (condMedia > 6.5 ? 40 : condMedia > 6.0 ? 20 : 0) - (tratRecientes * 10)));
+
+            // Score reproductivo: tasa gestacion, intervalos, abortos
+            const totalEcos = ecos.length;
+            const gestantes = ecos.filter(e => e.resultado === "gestante" || e.resultado === "prenada").length;
+            const tasaGest = totalEcos > 0 ? (gestantes / totalEcos * 100) : null;
+            const abortos = partos.filter(p => p.tipo === "aborto").length;
+            const scoreRepro = tasaGest !== null ? Math.max(0, Math.min(100, tasaGest - (abortos * 20) - (vaciaCount >= 2 ? 30 : 0))) : null;
+
+            // Score economico: litros totales / dias produccion
+            const litrosTotales = prod.reduce((s, p) => s + (p.litros || 0), 0);
+            const diasProd = prod.length;
+            const eficiencia = diasProd > 0 ? litrosTotales / diasProd : 0;
+            const precioLeche = 1.31;
+            const valorGenerado = litrosTotales * precioLeche;
+            const scoreEconomico = Math.max(0, Math.min(100, eficiencia > 3.0 ? 95 : eficiencia > 2.5 ? 80 : eficiencia > 2.0 ? 65 : eficiencia > 1.5 ? 45 : eficiencia > 1.0 ? 25 : 10));
+
+            const colorScore = (s) => s >= 70 ? "#059669" : s >= 40 ? "#E8950A" : "#DC2626";
+            const labelScore = (s) => s >= 70 ? "Bueno" : s >= 40 ? "Vigilar" : "Critico";
+
+            // Madre en el rebano?
+            const madre = cabra.madre_id ? data.cabras.find(c => c.id === cabra.madre_id) : null;
+            const madreProd = madre ? (data.produccion || []).filter(p => p.cabra_id === madre.id).slice(0, 5) : [];
+            const madreLitros = madreProd.length > 0 ? madreProd.reduce((s, p) => s + (p.litros || 0), 0) / madreProd.length : null;
+
+            return (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B", marginBottom: 10 }}>🧠 Inteligencia</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}>
+                  <div style={{ textAlign: "center", padding: "10px 8px", background: `${colorScore(scoreSalud)}10`, borderRadius: 10, border: `1px solid ${colorScore(scoreSalud)}30` }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: colorScore(scoreSalud), fontFamily: "'Space Mono', monospace" }}>{scoreSalud}</div>
+                    <div style={{ fontSize: 10, color: "#64748B" }}>Salud</div>
+                    <div style={{ fontSize: 9, color: colorScore(scoreSalud), fontWeight: 600 }}>{labelScore(scoreSalud)}</div>
+                  </div>
+                  <div style={{ textAlign: "center", padding: "10px 8px", background: scoreRepro !== null ? `${colorScore(scoreRepro)}10` : "#F8FAFC", borderRadius: 10, border: `1px solid ${scoreRepro !== null ? colorScore(scoreRepro) + "30" : "#E2E8F0"}` }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: scoreRepro !== null ? colorScore(scoreRepro) : "#94A3B8", fontFamily: "'Space Mono', monospace" }}>{scoreRepro !== null ? scoreRepro.toFixed(0) : "-"}</div>
+                    <div style={{ fontSize: 10, color: "#64748B" }}>Reproductivo</div>
+                    <div style={{ fontSize: 9, color: scoreRepro !== null ? colorScore(scoreRepro) : "#94A3B8", fontWeight: 600 }}>{scoreRepro !== null ? labelScore(scoreRepro) : "Sin datos"}</div>
+                  </div>
+                  <div style={{ textAlign: "center", padding: "10px 8px", background: `${colorScore(scoreEconomico)}10`, borderRadius: 10, border: `1px solid ${colorScore(scoreEconomico)}30` }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: colorScore(scoreEconomico), fontFamily: "'Space Mono', monospace" }}>{scoreEconomico}</div>
+                    <div style={{ fontSize: 10, color: "#64748B" }}>Economico</div>
+                    <div style={{ fontSize: 9, color: colorScore(scoreEconomico), fontWeight: 600 }}>{eficiencia.toFixed(1)}L/dia</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 11, color: "#64748B", background: "#F8FAFC", padding: "4px 10px", borderRadius: 8 }}>Valor generado: <strong style={{ color: "#059669" }}>{valorGenerado.toFixed(0)}\u20AC</strong> ({diasProd} dias)</div>
+                  {crias.length > 0 && <div style={{ fontSize: 11, color: "#64748B", background: "#F8FAFC", padding: "4px 10px", borderRadius: 8 }}>Crias: <strong>{crias.length}</strong> ({crias.filter(c => c.sexo === "hembra").length}H)</div>}
+                  {madre && <div style={{ fontSize: 11, color: "#7C3AED", background: "#F5F3FF", padding: "4px 10px", borderRadius: 8 }}>Madre: <strong>{madre.crotal}</strong>{madreLitros ? ` (${madreLitros.toFixed(1)}L/dia)` : ""}</div>}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Production history */}
           {prod.length > 0 && (
             <div style={{ marginBottom: 20 }}>
@@ -591,8 +1255,26 @@ function ChatBox({ messages, input, setInput, onSend, examples, onExample, place
       )}
       <div style={{ flex: 1, overflow: "auto", padding: expanded ? "20px 28px" : 16, display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m, i) => (
-          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: expanded ? "14px 20px" : "10px 15px", maxWidth: m.role === "user" ? "85%" : "95%", fontSize: expanded ? 14 : 13, color: "#334155", lineHeight: 1.5 }}>
-            {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: m.role === "user" ? "85%" : "95%" }}>
+            <div style={{ background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: expanded ? "14px 20px" : "10px 15px", fontSize: expanded ? 14 : 13, color: "#334155", lineHeight: 1.5 }}>
+              {m.role === "assistant" ? <FormattedMessage text={m.text} /> : m.text}
+            </div>
+            {m.role === "assistant" && (
+              <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
+                <button onClick={() => downloadPDF(m.text, messages[i - 1]?.text || "Consulta")} title="Descargar PDF"
+                  style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                  {"\uD83D\uDCC4"} PDF
+                </button>
+                <button onClick={() => downloadExcel(m.text, messages[i - 1]?.text || "Consulta")} title="Descargar Excel"
+                  style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                  {"\uD83D\uDCCA"} Excel
+                </button>
+              </div>
+            )}
           </div>
         ))}
         <div ref={msgsEnd} />
@@ -666,33 +1348,90 @@ function FormattedLine({ line }) {
   );
 }
 
-function FormattedMessage({ text }) {
-  if (!text) return null;
-  const lines = text.split('\n');
-  const elements = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.startsWith('## ')) {
-      const title = line.replace('## ', '');
-      const sectionLines = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('## ')) {
-        if (lines[i].trim()) sectionLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <div key={elements.length} style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 12, padding: "14px 18px", marginBottom: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F1F5F9" }}>{title}</div>
-          {sectionLines.map((sl, j) => <FormattedLine key={j} line={sl} />)}
+function FormattedTable({ headers, rows }) {
+  const isNumeric = (val) => /^\d/.test((val || "").trim());
+  return (
+    <div style={{ overflowX: "auto", margin: "8px 0", borderRadius: 10, border: "1px solid #E2E8F0" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            {headers.map((h, i) => (
+              <th key={i} style={{ background: "#E8950A", color: "#FFF", padding: "8px 10px", textAlign: "left", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap", borderBottom: "2px solid #CA8106" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={ri} style={{ background: ri % 2 === 0 ? "#FFF" : "#F8FAFC" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#FEF9EE"}
+              onMouseLeave={e => e.currentTarget.style.background = ri % 2 === 0 ? "#FFF" : "#F8FAFC"}>
+              {row.map((cell, ci) => (
+                <td key={ci} style={{
+                  padding: "6px 10px", borderBottom: "1px solid #F1F5F9",
+                  fontFamily: isNumeric(cell) ? "'Space Mono', monospace" : "inherit",
+                  textAlign: isNumeric(cell) ? "right" : "left",
+                  fontSize: 12, color: "#334155", whiteSpace: "nowrap",
+                }}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CollapsibleSection({ summary, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ border: "1px solid #E2E8F0", borderRadius: 11, marginBottom: 8, overflow: "hidden" }}>
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", background: "#FFF", userSelect: "none" }}
+        onMouseEnter={e => e.currentTarget.style.background = "#FEF9EE"}
+        onMouseLeave={e => e.currentTarget.style.background = "#FFF"}>
+        <span style={{ fontSize: 11, color: "#E8950A", transition: "transform .2s", transform: open ? "rotate(90deg)" : "none" }}>{"\u25B6"}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#E8950A" }}>{summary}</span>
+        <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: "auto" }}>{open ? "Cerrar" : "Ver m\u00e1s"}</span>
+      </div>
+      {open && (
+        <div style={{ padding: "8px 14px 14px", borderTop: "1px solid #F1F5F9", background: "#FAFAFA" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RenderBlocks({ blocks }) {
+  return blocks.map((b, idx) => {
+    if (b.type === "section") {
+      return (
+        <div key={idx} style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 12, padding: "14px 18px", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F1F5F9" }}>{b.title}</div>
+          <RenderBlocks blocks={b.children} />
         </div>
       );
-      continue;
     }
-    if (line.trim()) elements.push(<FormattedLine key={elements.length} line={line} />);
-    i++;
-  }
-  return <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>{elements}</div>;
+    if (b.type === "table") {
+      return <FormattedTable key={idx} headers={b.headers} rows={b.rows} />;
+    }
+    if (b.type === "collapsible") {
+      return (
+        <CollapsibleSection key={idx} summary={b.summary}>
+          <RenderBlocks blocks={b.children} />
+        </CollapsibleSection>
+      );
+    }
+    if (b.type === "line") {
+      return <FormattedLine key={idx} line={(b.isList ? "- " : "") + b.text} />;
+    }
+    return null;
+  });
+}
+
+function FormattedMessage({ text }) {
+  if (!text) return null;
+  const blocks = parseMessageStructure(text);
+  return <div style={{ display: "flex", flexDirection: "column", gap: 2 }}><RenderBlocks blocks={blocks} /></div>;
 }
 
 // ==========================================
@@ -891,6 +1630,141 @@ function DashboardPage({ data }) {
           </div>
         )}
       </div>
+
+      {/* === INTELIGENCIA DEL DIA === */}
+      {(() => {
+        const tendencias = analizarTendencias(data);
+        const repro = calcularTimelineReproductivo(data);
+        const trats = evaluarTratamientos(data);
+        const ultimoResumen = (data.resumenes || []).find(r => r.hallazgos);
+
+        const criticas = tendencias.tendencias.filter(t => t.severidad === "alta");
+        const declives = tendencias.tendencias.filter(t => t.tipo === "DECLIVE");
+        const respuestas = tendencias.tendencias.filter(t => t.tipo === "RESPUESTA_TRATAMIENTO");
+        const secadosUrg = repro.alertas.filter(a => a.tipo === "SECADO_URGENTE");
+        const ecosPend = repro.alertas.filter(a => a.tipo === "ECO_PENDIENTE");
+        const partosNR = repro.alertas.filter(a => a.tipo === "PARTO_NO_REGISTRADO");
+        const proxEventos = repro.proximos.slice(0, 5);
+        const tratsBajos = Object.values(trats.porProducto).filter(p => p.tasaEfectividad < 50 && p.total >= 2);
+
+        const hayAlgo = criticas.length > 0 || declives.length > 0 || secadosUrg.length > 0 || ecosPend.length > 0 || partosNR.length > 0 || proxEventos.length > 0 || respuestas.length > 0 || tratsBajos.length > 0;
+        if (!hayAlgo && !tendencias.resumen) return null;
+
+        return (
+          <Card>
+            <SectionTitle icon="\uD83E\uDDE0" text="Inteligencia del D\u00eda" color="#7C3AED" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+
+              {/* Tendencia global */}
+              {tendencias.resumen && (
+                <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", marginBottom: 8 }}>\uD83D\uDCC8 Tendencia del Reba\u00f1o</div>
+                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: tendencias.resumen.cambioGlobal >= 0 ? "#059669" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>
+                      {tendencias.resumen.cambioGlobal >= 0 ? "+" : ""}{tendencias.resumen.cambioGlobal.toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748B", lineHeight: 1.5 }}>
+                      Media: {tendencias.resumen.mediaHoy?.toFixed(2)}L/cabra<br />
+                      vs {tendencias.resumen.mediaAyer?.toFixed(2)}L d\u00eda anterior
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Alertas criticas */}
+              {criticas.length > 0 && (
+                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 8 }}>\uD83D\uDD34 Cr\u00edticas ({criticas.length})</div>
+                  {criticas.slice(0, 5).map((t, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "4px 0", borderBottom: i < Math.min(criticas.length, 5) - 1 ? "1px solid #FEE2E2" : "none" }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
+                      <span style={{ marginLeft: 8, color: "#64748B" }}>{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} — {t.detalle}</span>
+                    </div>
+                  ))}
+                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>+ {criticas.length - 5} m\u00e1s</div>}
+                </div>
+              )}
+
+              {/* Reproductivo */}
+              {(secadosUrg.length > 0 || ecosPend.length > 0 || partosNR.length > 0) && (
+                <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#EA580C", marginBottom: 8 }}>\uD83D\uDD04 Reproductivo</div>
+                  {secadosUrg.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      \u26A0\uFE0F <strong>{secadosUrg.length}</strong> secados urgentes: {secadosUrg.slice(0, 4).map(a => a.crotal).join(", ")}{secadosUrg.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                  {ecosPend.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      \uD83D\uDD2C <strong>{ecosPend.length}</strong> ecograf\u00edas pendientes: {ecosPend.slice(0, 4).map(a => a.crotal).join(", ")}{ecosPend.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                  {partosNR.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#DC2626", padding: "4px 0" }}>
+                      \uD83D\uDEA8 <strong>{partosNR.length}</strong> partos sin registrar: {partosNR.slice(0, 4).map(a => a.crotal).join(", ")}{partosNR.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Proximos eventos */}
+              {proxEventos.length > 0 && (
+                <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#2563EB", marginBottom: 8 }}>\uD83D\uDCC5 Pr\u00f3ximos Eventos</div>
+                  {proxEventos.map((e, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 600 }}>{e.crotal}</span>
+                      <span style={{ marginLeft: 8, color: "#64748B" }}>{e.detalle}</span>
+                      <span style={{ marginLeft: 6, fontSize: 10, color: "#2563EB", fontWeight: 600 }}>en {e.diasHasta}d</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Declives + respuestas tratamiento */}
+              {(declives.length > 0 || respuestas.length > 0) && (
+                <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 8 }}>\uD83D\uDCCA Tendencias Individuales</div>
+                  {declives.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      \uD83D\uDCC9 <strong>{declives.length}</strong> cabras en declive: {declives.slice(0, 4).map(t => t.crotal).join(", ")}{declives.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                  {respuestas.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#059669", padding: "4px 0" }}>
+                      \u2705 <strong>{respuestas.length}</strong> respondiendo a tratamiento: {respuestas.slice(0, 4).map(t => t.crotal).join(", ")}{respuestas.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tratamientos con baja efectividad */}
+              {tratsBajos.length > 0 && (
+                <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#D97706", marginBottom: 8 }}>\uD83D\uDC8A Tratamientos a Revisar</div>
+                  {tratsBajos.map((t, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
+                      <strong>{t.producto}</strong> ({t.tipo}): {t.tasaEfectividad}% efectividad ({t.efectivo}/{t.total} casos)
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Ultimo resumen guardado */}
+              {ultimoResumen && (
+                <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 8 }}>\uD83D\uDCBE \u00DAltima Importaci\u00f3n</div>
+                  <div style={{ fontSize: 12, color: "#64748B" }}>
+                    {new Date(ultimoResumen.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })} — {ultimoResumen.total_cabras} cabras, {ultimoResumen.litros_totales?.toFixed(0)}L totales
+                  </div>
+                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas cr\u00edticas detectadas</div>}
+                  {ultimoResumen.timeline_alertas > 0 && <div style={{ fontSize: 11, color: "#EA580C", marginTop: 2 }}>{ultimoResumen.timeline_alertas} alertas reproductivas</div>}
+                </div>
+              )}
+            </div>
+          </Card>
+        );
+      })()}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         <Card>
@@ -1218,6 +2092,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | "paridera" | "tratamiento" | "inseminacion" | null
+  const [pendingAction, setPendingAction] = useState(null); // { type, description, execute }
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
@@ -1402,9 +2277,13 @@ function ImportadorPage({ data, refresh, saveChat }) {
             }
           }
           if (newLote && cabra.lote_id !== newLote.id) {
+            const loteOrigenId = cabra.lote_id;
             const { error: errU } = await supabase.from("cabra").update({ lote_id: newLote.id, dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
             if (errU) { errorList.push(`${crotal}: error actualizando lote — ${errU.message}`); }
-            else { loteChanges++; }
+            else {
+              loteChanges++;
+              await supabase.from("cambio_lote").insert([{ cabra_id: cabra.id, lote_origen_id: loteOrigenId, lote_destino_id: newLote.id, fecha: reportDate, motivo: "CSV produccion" }]);
+            }
           } else {
             const { error: errU } = await supabase.from("cabra").update({ dias_en_leche: del_dias, num_lactaciones: lactacion }).eq("id", cabra.id);
             if (errU) { errorList.push(`${crotal}: error actualizando cabra — ${errU.message}`); }
@@ -1437,23 +2316,76 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     // Create daily summary
+    // === ANALISIS DIARIO AUTOMATICO POST-IMPORTACION ===
+    // Refrescar datos antes del analisis para tener los nuevos registros
+    const freshData = { ...data };
+    // Ejecutar motores de inteligencia
+    const analisisTendencias = analizarTendencias(freshData);
+    const analisisTratamientos = evaluarTratamientos(freshData);
+    const analisisRepro = calcularTimelineReproductivo(freshData);
+
+    const hallazgos = {
+      tendencias: analisisTendencias.tendencias.slice(0, 20),
+      resumenTendencias: analisisTendencias.resumen,
+      tratamientosEfectividad: Object.values(analisisTratamientos.porProducto),
+      alertasReproductivas: analisisRepro.alertas.slice(0, 20),
+      proximosEventos: analisisRepro.proximos.slice(0, 20),
+      timestamp: new Date().toISOString(),
+    };
+
+    const tendCriticas = analisisTendencias.tendencias.filter(t => t.severidad === "alta").length;
+    const reproAlertas = analisisRepro.alertas.length;
+
     await supabase.from("resumen_diario").upsert([{
       fecha: reportDate, total_cabras: dataRows.length,
       litros_totales: Math.round(totalLitros * 100) / 100,
       media_litros: Math.round(totalLitros / dataRows.length * 1000) / 1000,
       cabras_alta_conductividad: alertas.filter(a => a.msg.includes("conductividad")).length,
       archivo_origen: fileName,
+      hallazgos,
+      tendencias_criticas: tendCriticas,
+      timeline_alertas: reproAlertas,
+      anomalias_nuevas: analisisTendencias.tendencias.length,
     }], { onConflict: "fecha" });
 
-    setImportResult({ imported, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length });
+    setImportResult({
+      imported, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length,
+      // Inteligencia
+      hallazgos,
+      tendenciasCriticas: tendCriticas,
+      reproAlertas,
+      tendenciasTotal: analisisTendencias.tendencias.length,
+      proximosEventos: analisisRepro.proximos.length,
+    });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "produccion.csv", tipo: "produccion", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
-    
-    // Add result to chat
+
+    // Add result to chat — ahora con inteligencia
     let chatMsg = `✅ Importación completada:\n• ${imported}/${dataRows.length} registros de producción importados\n• ${totalLitros.toFixed(1)} litros totales hoy\n• ${loteChanges} cambios de lote detectados`;
     if (newCabras > 0) chatMsg += `\n• ${newCabras} cabras nuevas creadas`;
     if (errors > 0) chatMsg += `\n• 🔴 ${errors} errores:\n${errorList.slice(0, 10).map(e => `  - ${e}`).join("\n")}`;
     if (alertas.length > 0) chatMsg += `\n\n🚨 ALERTAS (${alertas.length}):\n${alertas.slice(0, 10).map(a => a.msg).join("\n")}`;
+
+    // Resumen de inteligencia automatica
+    chatMsg += `\n\n🧠 **ANÁLISIS AUTOMÁTICO:**`;
+    if (analisisTendencias.resumen) {
+      const r = analisisTendencias.resumen;
+      chatMsg += `\n📈 Producción: ${r.cambioGlobal >= 0 ? '+' : ''}${r.cambioGlobal.toFixed(1)}% vs día anterior`;
+      if (r.cabrasEnDeclive > 0) chatMsg += `\n⚠️ ${r.cabrasEnDeclive} cabras en declive`;
+      if (r.mastitisProbable > 0) chatMsg += `\n🔴 ${r.mastitisProbable} posibles mastitis (caída + conductividad alta)`;
+      if (r.respuestasTratamiento > 0) chatMsg += `\n✅ ${r.respuestasTratamiento} cabras respondiendo bien a tratamiento`;
+    }
+    if (analisisRepro.alertas.length > 0) {
+      chatMsg += `\n🔄 ${analisisRepro.alertas.length} alertas reproductivas`;
+      const secados = analisisRepro.alertas.filter(a => a.tipo === "SECADO_URGENTE");
+      const ecosPend = analisisRepro.alertas.filter(a => a.tipo === "ECO_PENDIENTE");
+      if (secados.length > 0) chatMsg += ` (${secados.length} secados urgentes)`;
+      if (ecosPend.length > 0) chatMsg += ` (${ecosPend.length} ecos pendientes)`;
+    }
+    if (analisisRepro.proximos.length > 0) {
+      chatMsg += `\n📅 ${analisisRepro.proximos.length} eventos próximos`;
+    }
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 
@@ -1501,6 +2433,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "anotaciones" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "anotaciones.csv", tipo: "anotaciones", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1606,6 +2539,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported: partos + abortos, errors, errorList, total: dataRows.length, tipo: "paridera" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "paridera.csv", tipo: "paridera", registros_procesados: partos + abortos, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1663,6 +2597,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "tratamiento" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "tratamientos.csv", tipo: "tratamiento", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1732,6 +2667,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     setImportResult({ imported, errors, errorList, total: dataRows.length, tipo: "inseminacion" });
+    await supabase.from("importacion").insert([{ nombre_archivo: fileName || "inseminacion.csv", tipo: "inseminacion", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
@@ -1832,16 +2768,24 @@ function ImportadorPage({ data, refresh, saveChat }) {
       }
     }
 
-    // Detect death registration
+    // Detect death registration — requires confirmation
     if ((msgLow.includes("muerto") || msgLow.includes("muerta") || msgLow.includes("fallecido") || msgLow.includes("baja")) && crotalMatch) {
       const crotal = crotalMatch[1];
       const cabra = data.cabras.find(c => c.crotal === crotal);
       if (cabra) {
-        const today = new Date().toISOString().split("T")[0];
-        await supabase.from("muerte").insert([{ cabra_id: cabra.id, fecha: today, causa: userMsg }]);
-        await supabase.from("cabra").update({ estado: "muerta", lote_id: null }).eq("id", cabra.id);
-        refresh();
-        setMs(p => [...p, { role: "assistant", text: `✅ **Baja registrada:**\n- Cabra: ${crotal}\n- Fecha: ${today}\n- Estado cambiado a "muerta"\n- Retirada del lote` }]);
+        const loteNombre = data.lotes.find(l => l.id === cabra.lote_id)?.nombre || "Sin lote";
+        setPendingAction({
+          type: "muerte",
+          description: `Registrar baja/muerte de cabra ${crotal} (${loteNombre}, ${cabra.num_lactaciones || 0} lactaciones)`,
+          execute: async () => {
+            const today = new Date().toISOString().split("T")[0];
+            await supabase.from("muerte").insert([{ cabra_id: cabra.id, fecha: today, causa: userMsg, crotal: crotal }]);
+            await supabase.from("cabra").update({ estado: "muerta", lote_id: null }).eq("id", cabra.id);
+            refresh();
+            setMs(p => [...p, { role: "assistant", text: `✅ **Baja registrada:**\n- Cabra: ${crotal}\n- Fecha: ${today}\n- Estado cambiado a "muerta"\n- Retirada del lote\n- Registrado en historial` }]);
+          }
+        });
+        setMs(p => [...p, { role: "assistant", text: `⚠️ **Confirmar baja:**\n\nSe va a registrar la muerte de la cabra **${crotal}**.\n- Lote actual: ${loteNombre}\n- Lactaciones: ${cabra.num_lactaciones || 0}\n- Causa: "${userMsg}"\n\n**Esta accion es irreversible.** Pulsa "Confirmar" o "Cancelar".` }]);
         setLd(false);
         return;
       }
@@ -1854,9 +2798,12 @@ function ImportadorPage({ data, refresh, saveChat }) {
       const cabra = data.cabras.find(c => c.crotal === crotal);
       const lote = data.lotes.find(l => l.nombre && l.nombre.includes(`Lote ${loteNum}`));
       if (cabra && lote) {
+        const loteOrigenId = cabra.lote_id;
         await supabase.from("cabra").update({ lote_id: lote.id }).eq("id", cabra.id);
+        await supabase.from("cambio_lote").insert([{ cabra_id: cabra.id, lote_origen_id: loteOrigenId, lote_destino_id: lote.id, fecha: new Date().toISOString().split("T")[0], motivo: "Chat importador" }]);
         refresh();
-        setMs(p => [...p, { role: "assistant", text: `✅ **Cambio de lote:**\n- Cabra: ${crotal}\n- Nuevo lote: ${lote.nombre}\n\nActualizado en la base de datos.` }]);
+        const loteOrigenNombre = data.lotes.find(l => l.id === loteOrigenId)?.nombre || "Sin lote";
+        setMs(p => [...p, { role: "assistant", text: `✅ **Cambio de lote registrado:**\n- Cabra: ${crotal}\n- De: ${loteOrigenNombre}\n- A: ${lote.nombre}\n\nActualizado en la base de datos y registrado en historial.` }]);
         setLd(false);
         return;
       }
@@ -1990,11 +2937,66 @@ function ImportadorPage({ data, refresh, saveChat }) {
             )}
             {importResult.alertas && importResult.alertas.length > 0 && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>🚨 Alertas ({importResult.alertas.length})</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>{"\uD83D\uDEA8"} Alertas ({importResult.alertas.length})</div>
                 {importResult.alertas.slice(0, 8).map((a, i) => (
                   <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0", borderBottom: "1px solid #F1F5F9" }}>{a.msg}</div>
                 ))}
-                {importResult.alertas.length > 8 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>...y {importResult.alertas.length - 8} más</div>}
+                {importResult.alertas.length > 8 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>...y {importResult.alertas.length - 8} m\u00e1s</div>}
+              </div>
+            )}
+            {/* === PANEL INTELIGENCIA POST-IMPORTACION === */}
+            {importResult.hallazgos && (
+              <div style={{ marginTop: 12, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 11, padding: "14px 16px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED", marginBottom: 10 }}>{"\uD83E\uDDE0"} An\u00e1lisis Autom\u00e1tico</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginBottom: 10 }}>
+                  {importResult.tendenciasCriticas > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#FEF2F2", borderRadius: 8, border: "1px solid #FECACA" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#DC2626", fontFamily: "'Space Mono', monospace" }}>{importResult.tendenciasCriticas}</div>
+                      <div style={{ fontSize: 9.5, color: "#DC2626" }}>Alertas cr\u00edticas</div>
+                    </div>
+                  )}
+                  {importResult.tendenciasTotal > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#FFFBEB", borderRadius: 8, border: "1px solid #FDE68A" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#D97706", fontFamily: "'Space Mono', monospace" }}>{importResult.tendenciasTotal}</div>
+                      <div style={{ fontSize: 9.5, color: "#D97706" }}>Tendencias</div>
+                    </div>
+                  )}
+                  {importResult.reproAlertas > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#FFF7ED", borderRadius: 8, border: "1px solid #FED7AA" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#EA580C", fontFamily: "'Space Mono', monospace" }}>{importResult.reproAlertas}</div>
+                      <div style={{ fontSize: 9.5, color: "#EA580C" }}>Repro alertas</div>
+                    </div>
+                  )}
+                  {importResult.proximosEventos > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#EFF6FF", borderRadius: 8, border: "1px solid #BFDBFE" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#2563EB", fontFamily: "'Space Mono', monospace" }}>{importResult.proximosEventos}</div>
+                      <div style={{ fontSize: 9.5, color: "#2563EB" }}>Eventos pr\u00f3ximos</div>
+                    </div>
+                  )}
+                </div>
+                {/* Detalle de hallazgos criticos */}
+                {importResult.hallazgos.tendencias && importResult.hallazgos.tendencias.filter(t => t.severidad === "alta").length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", marginBottom: 4 }}>{"\uD83D\uDD34"} Requieren acci\u00f3n inmediata:</div>
+                    {importResult.hallazgos.tendencias.filter(t => t.severidad === "alta").slice(0, 5).map((t, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0" }}>
+                        <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
+                        {" "}{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} — {t.detalle}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {importResult.hallazgos.alertasReproductivas && importResult.hallazgos.alertasReproductivas.filter(a => a.severidad === "alta").length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#EA580C", marginBottom: 4 }}>{"\uD83D\uDD04"} Reproductivo urgente:</div>
+                    {importResult.hallazgos.alertasReproductivas.filter(a => a.severidad === "alta").slice(0, 5).map((a, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0" }}>
+                        <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#EA580C" }}>{a.crotal}</span>
+                        {" "}{a.tipo.replace(/_/g, " ")} — {a.detalle}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {importResult.errors > 0 && (
@@ -2029,6 +3031,15 @@ function ImportadorPage({ data, refresh, saveChat }) {
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
+        {pendingAction && (
+          <div style={{ background: "#FEF3C7", border: "2px solid #F59E0B", borderRadius: 12, padding: "14px 18px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ fontSize: 13, color: "#92400E", flex: 1 }}>⚠️ <strong>{pendingAction.description}</strong></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={async () => { await pendingAction.execute(); setPendingAction(null); }} style={{ background: "#DC2626", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Confirmar</button>
+              <button onClick={() => { setPendingAction(null); setMs(p => [...p, { role: "assistant", text: "Cancelado. No se ha registrado nada." }]); }} style={{ background: "#64748B", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Cancelar</button>
+            </div>
+          </div>
+        )}
         <ChatBox messages={ms} input={m} setInput={setM} onSend={s} placeholder="Explícame qué has hecho o pregunta..." height={canImport ? 380 : 500} onSave={saveChat} pageName="importador" />
       </div>
     </div>
@@ -2619,8 +3630,26 @@ function ConsultasPage({ data, saveChat }) {
         )}
         <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
           {ms.map((m, i) => (
-            <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: m.role === "user" ? "80%" : "90%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
-              {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+            <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: m.role === "user" ? "80%" : "90%" }}>
+              <div style={{ background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
+                {m.role === "assistant" ? <FormattedMessage text={m.text} /> : m.text}
+              </div>
+              {m.role === "assistant" && (
+                <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
+                  <button onClick={() => downloadPDF(m.text, ms[i - 1]?.text || "Consulta")} title="Descargar PDF"
+                    style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                    {"\uD83D\uDCC4"} PDF
+                  </button>
+                  <button onClick={() => downloadExcel(m.text, ms[i - 1]?.text || "Consulta")} title="Descargar Excel"
+                    style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                    {"\uD83D\uDCCA"} Excel
+                  </button>
+                </div>
+              )}
             </div>
           ))}
           {ld && <div style={{ alignSelf: "flex-start", padding: "13px 17px", background: "#F8FAFC", borderRadius: 13, border: "1px solid #F1F5F9" }}><div style={{ display: "flex", gap: 5 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "#E8950A", animation: `bounce 1.4s ease ${i * .2}s infinite`, opacity: .5 }} />)}</div></div>}
@@ -4375,8 +5404,26 @@ function GuardadosPage({ data, refresh }) {
         <Card>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "calc(100vh - 250px)", overflow: "auto" }}>
             {msgs.map((m, i) => (
-              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: m.role === "user" ? "80%" : "95%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
-                {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: m.role === "user" ? "80%" : "95%" }}>
+                <div style={{ background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
+                  {m.role === "assistant" ? <FormattedMessage text={m.text} /> : m.text}
+                </div>
+                {m.role === "assistant" && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
+                    <button onClick={() => downloadPDF(m.text, msgs[i - 1]?.text || "Consulta")} title="Descargar PDF"
+                      style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                      {"\uD83D\uDCC4"} PDF
+                    </button>
+                    <button onClick={() => downloadExcel(m.text, msgs[i - 1]?.text || "Consulta")} title="Descargar Excel"
+                      style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                      {"\uD83D\uDCCA"} Excel
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

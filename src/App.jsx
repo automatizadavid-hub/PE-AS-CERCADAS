@@ -545,6 +545,255 @@ function calcularTimelineReproductivo(data) {
 }
 
 // ==========================================
+// MESSAGE PARSING & EXPORT UTILITIES
+// ==========================================
+
+function extractMarkdownTables(text) {
+  const lines = text.split("\n");
+  const tables = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (line.startsWith("|") && line.endsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      if (tableLines.length >= 2) {
+        const parseRow = (row) => row.split("|").slice(1, -1).map(c => c.trim());
+        const headers = parseRow(tableLines[0]);
+        const isSep = (row) => parseRow(row).every(c => /^[-:]+$/.test(c));
+        const startIdx = isSep(tableLines[1]) ? 2 : 1;
+        const rows = tableLines.slice(startIdx).map(parseRow);
+        if (rows.length > 0) tables.push({ headers, rows });
+      }
+    } else {
+      i++;
+    }
+  }
+  return tables;
+}
+
+function parseMessageStructure(text) {
+  if (!text) return [];
+  const lines = text.split("\n");
+  const blocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Table block
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      if (tableLines.length >= 2) {
+        const parseRow = (row) => row.split("|").slice(1, -1).map(c => c.trim());
+        const headers = parseRow(tableLines[0]);
+        const isSep = (row) => parseRow(row).every(c => /^[-:]+$/.test(c));
+        const startIdx = isSep(tableLines[1]) ? 2 : 1;
+        const rows = tableLines.slice(startIdx).map(parseRow);
+        if (rows.length > 0) blocks.push({ type: "table", headers, rows });
+      }
+      continue;
+    }
+
+    // Collapsible block
+    if (trimmed === "<details>" || trimmed.startsWith("<details>")) {
+      i++;
+      let summary = "";
+      if (i < lines.length) {
+        const sumLine = lines[i].trim();
+        const sumMatch = sumLine.match(/<summary>(.*?)<\/summary>/);
+        if (sumMatch) { summary = sumMatch[1]; i++; }
+      }
+      const innerLines = [];
+      while (i < lines.length && !lines[i].trim().startsWith("</details>")) {
+        innerLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++; // skip </details>
+      blocks.push({ type: "collapsible", summary, children: parseMessageStructure(innerLines.join("\n")) });
+      continue;
+    }
+
+    // Section header
+    if (trimmed.startsWith("## ")) {
+      const title = trimmed.replace(/^## /, "");
+      const children = [];
+      i++;
+      while (i < lines.length) {
+        const next = lines[i].trim();
+        if (next.startsWith("## ") || next === "<details>" || next.startsWith("<details>")) break;
+        if (next.startsWith("|") && next.endsWith("|")) break;
+        if (next === "") { i++; continue; }
+        const isList = next.startsWith("- ") || next.startsWith("\u2022 ");
+        const lineText = isList ? next.replace(/^[-\u2022]\s+/, "") : next;
+        children.push({
+          type: "line", text: lineText, isList,
+          isAlert: /[\u26A0\uFE0F]|\uD83D\uDD34|ALERTA|URGENTE/.test(next),
+          isPositive: /\u2705|ESTRELLA|IDEAL/.test(next),
+        });
+        i++;
+      }
+      blocks.push({ type: "section", title, children });
+      continue;
+    }
+
+    // Regular line
+    if (trimmed !== "") {
+      const isList = trimmed.startsWith("- ") || trimmed.startsWith("\u2022 ");
+      const lineText = isList ? trimmed.replace(/^[-\u2022]\s+/, "") : trimmed;
+      blocks.push({
+        type: "line", text: lineText, isList,
+        isAlert: /[\u26A0\uFE0F]|\uD83D\uDD34|ALERTA|URGENTE/.test(trimmed),
+        isPositive: /\u2705|ESTRELLA|IDEAL/.test(trimmed),
+      });
+    }
+    i++;
+  }
+  return blocks;
+}
+
+// PDF generation
+function generatePrintableHTML(text, queryTitle) {
+  const blocks = parseMessageStructure(text);
+  const fecha = new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
+
+  function renderBold(str) {
+    return str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function blocksToHTML(blks) {
+    return blks.map(b => {
+      if (b.type === "section") {
+        return `<h2 style="color:#1E293B;border-bottom:2px solid #E8950A;padding-bottom:6px;margin-top:18px;font-size:16px;">${renderBold(b.title)}</h2>` +
+          blocksToHTML(b.children);
+      }
+      if (b.type === "table") {
+        let html = '<div style="overflow-x:auto;margin:10px 0;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
+        html += "<tr>" + b.headers.map(h => `<th style="background:#E8950A;color:#FFF;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;">${renderBold(h)}</th>`).join("") + "</tr>";
+        b.rows.forEach((row, ri) => {
+          const bg = ri % 2 === 0 ? "#FFF" : "#F8FAFC";
+          html += "<tr>" + row.map(c => {
+            const isNum = /^\d/.test(c.trim());
+            return `<td style="border:1px solid #E2E8F0;padding:6px 10px;background:${bg};${isNum ? "text-align:right;font-family:monospace;" : ""}">${renderBold(c)}</td>`;
+          }).join("") + "</tr>";
+        });
+        html += "</table></div>";
+        return html;
+      }
+      if (b.type === "collapsible") {
+        return `<div style="margin:10px 0;border:1px solid #E2E8F0;border-radius:6px;padding:10px 14px;"><h3 style="color:#E8950A;font-size:14px;margin:0 0 8px 0;">${renderBold(b.summary)}</h3>` +
+          blocksToHTML(b.children) + "</div>";
+      }
+      if (b.type === "line") {
+        let style = "font-size:13px;line-height:1.6;margin:2px 0;";
+        if (b.isAlert) style += "background:#FEF2F2;border-left:3px solid #DC2626;padding:4px 10px;color:#991B1B;border-radius:4px;";
+        else if (b.isPositive) style += "background:#F0FDF4;border-left:3px solid #059669;padding:4px 10px;color:#065F46;border-radius:4px;";
+        else if (b.isList) style += "padding-left:16px;";
+        const prefix = b.isList ? '<span style="color:#E8950A;margin-right:6px;">\u203A</span>' : "";
+        return `<div style="${style}">${prefix}${renderBold(b.text)}</div>`;
+      }
+      return "";
+    }).join("\n");
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>PE\u00d1AS CERCADAS - ${queryTitle.substring(0, 60)}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 40px; color: #1E293B; }
+  @media print {
+    body { margin: 20px; }
+    table { page-break-inside: auto; }
+    tr { page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+  }
+</style></head><body>
+<div style="text-align:center;border-bottom:3px solid #E8950A;padding-bottom:16px;margin-bottom:20px;">
+  <div style="font-size:26px;font-weight:bold;color:#1E293B;">PE\u00d1AS CERCADAS</div>
+  <div style="font-size:13px;color:#64748B;">Ganader\u00eda Caprina Murciano-Granadina</div>
+  <div style="font-size:12px;color:#94A3B8;margin-top:4px;">${fecha}</div>
+</div>
+<div style="background:#FEF9EE;border:1px solid #FDE68A;border-radius:8px;padding:10px 16px;margin-bottom:20px;">
+  <div style="font-size:11px;color:#92400E;font-weight:600;">CONSULTA:</div>
+  <div style="font-size:14px;color:#1E293B;">${queryTitle.length > 200 ? queryTitle.substring(0, 200) + "..." : queryTitle}</div>
+</div>
+${blocksToHTML(blocks)}
+<div style="margin-top:30px;border-top:1px solid #E2E8F0;padding-top:10px;font-size:10px;color:#94A3B8;text-align:center;">
+  Generado por PE\u00d1AS CERCADAS \u2014 Sistema de Gesti\u00f3n Ganadera Inteligente \u2014 ${fecha}
+</div>
+</body></html>`;
+}
+
+function downloadPDF(messageText, queryTitle) {
+  const html = generatePrintableHTML(messageText, queryTitle);
+  const w = window.open("", "_blank", "width=800,height=600");
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => { w.print(); }, 400);
+}
+
+function downloadExcel(messageText, queryTitle) {
+  const tables = extractMarkdownTables(messageText);
+  const fecha = new Date().toLocaleDateString("es-ES");
+  let content, filename, mimeType;
+
+  if (tables.length > 0) {
+    let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>';
+    html += `<h2>PE\u00d1AS CERCADAS</h2><p>${fecha} \u2014 ${queryTitle.substring(0, 100)}</p>`;
+    tables.forEach((t, ti) => {
+      if (ti > 0) html += "<br/>";
+      html += '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;">';
+      html += "<tr>" + t.headers.map(h => `<th style="background:#E8950A;color:#FFF;font-weight:bold;">${h}</th>`).join("") + "</tr>";
+      t.rows.forEach(row => {
+        html += "<tr>" + row.map(c => `<td>${c}</td>`).join("") + "</tr>";
+      });
+      html += "</table>";
+    });
+    html += "</body></html>";
+    content = html;
+    filename = `penas-cercadas-${fecha.replace(/\//g, "-")}.xls`;
+    mimeType = "application/vnd.ms-excel";
+  } else {
+    // CSV fallback for text-only responses
+    const blocks = parseMessageStructure(messageText);
+    let csv = "\uFEFF"; // BOM for Excel UTF-8
+    csv += `"PE\u00d1AS CERCADAS - ${fecha}"\n`;
+    csv += `"Consulta: ${queryTitle.replace(/"/g, '""').substring(0, 200)}"\n\n`;
+    csv += '"Seccion","Contenido"\n';
+    let currentSection = "General";
+    blocks.forEach(b => {
+      if (b.type === "section") {
+        currentSection = b.title.replace(/"/g, '""');
+        b.children.forEach(c => {
+          if (c.type === "line") csv += `"${currentSection}","${c.text.replace(/\*\*/g, "").replace(/"/g, '""')}"\n`;
+        });
+      } else if (b.type === "line") {
+        csv += `"${currentSection}","${b.text.replace(/\*\*/g, "").replace(/"/g, '""')}"\n`;
+      }
+    });
+    content = csv;
+    filename = `penas-cercadas-${fecha.replace(/\//g, "-")}.csv`;
+    mimeType = "text/csv;charset=utf-8";
+  }
+
+  const blob = new Blob([content], { type: mimeType });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+// ==========================================
 // LOGIN PAGE
 // ==========================================
 function LoginPage({ onLogin }) {
@@ -1006,8 +1255,26 @@ function ChatBox({ messages, input, setInput, onSend, examples, onExample, place
       )}
       <div style={{ flex: 1, overflow: "auto", padding: expanded ? "20px 28px" : 16, display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((m, i) => (
-          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: expanded ? "14px 20px" : "10px 15px", maxWidth: m.role === "user" ? "85%" : "95%", fontSize: expanded ? 14 : 13, color: "#334155", lineHeight: 1.5 }}>
-            {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: m.role === "user" ? "85%" : "95%" }}>
+            <div style={{ background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 12, padding: expanded ? "14px 20px" : "10px 15px", fontSize: expanded ? 14 : 13, color: "#334155", lineHeight: 1.5 }}>
+              {m.role === "assistant" ? <FormattedMessage text={m.text} /> : m.text}
+            </div>
+            {m.role === "assistant" && (
+              <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
+                <button onClick={() => downloadPDF(m.text, messages[i - 1]?.text || "Consulta")} title="Descargar PDF"
+                  style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                  {"\uD83D\uDCC4"} PDF
+                </button>
+                <button onClick={() => downloadExcel(m.text, messages[i - 1]?.text || "Consulta")} title="Descargar Excel"
+                  style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                  {"\uD83D\uDCCA"} Excel
+                </button>
+              </div>
+            )}
           </div>
         ))}
         <div ref={msgsEnd} />
@@ -1081,33 +1348,90 @@ function FormattedLine({ line }) {
   );
 }
 
-function FormattedMessage({ text }) {
-  if (!text) return null;
-  const lines = text.split('\n');
-  const elements = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.startsWith('## ')) {
-      const title = line.replace('## ', '');
-      const sectionLines = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('## ')) {
-        if (lines[i].trim()) sectionLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <div key={elements.length} style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 12, padding: "14px 18px", marginBottom: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F1F5F9" }}>{title}</div>
-          {sectionLines.map((sl, j) => <FormattedLine key={j} line={sl} />)}
+function FormattedTable({ headers, rows }) {
+  const isNumeric = (val) => /^\d/.test((val || "").trim());
+  return (
+    <div style={{ overflowX: "auto", margin: "8px 0", borderRadius: 10, border: "1px solid #E2E8F0" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            {headers.map((h, i) => (
+              <th key={i} style={{ background: "#E8950A", color: "#FFF", padding: "8px 10px", textAlign: "left", fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap", borderBottom: "2px solid #CA8106" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={ri} style={{ background: ri % 2 === 0 ? "#FFF" : "#F8FAFC" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#FEF9EE"}
+              onMouseLeave={e => e.currentTarget.style.background = ri % 2 === 0 ? "#FFF" : "#F8FAFC"}>
+              {row.map((cell, ci) => (
+                <td key={ci} style={{
+                  padding: "6px 10px", borderBottom: "1px solid #F1F5F9",
+                  fontFamily: isNumeric(cell) ? "'Space Mono', monospace" : "inherit",
+                  textAlign: isNumeric(cell) ? "right" : "left",
+                  fontSize: 12, color: "#334155", whiteSpace: "nowrap",
+                }}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CollapsibleSection({ summary, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ border: "1px solid #E2E8F0", borderRadius: 11, marginBottom: 8, overflow: "hidden" }}>
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", background: "#FFF", userSelect: "none" }}
+        onMouseEnter={e => e.currentTarget.style.background = "#FEF9EE"}
+        onMouseLeave={e => e.currentTarget.style.background = "#FFF"}>
+        <span style={{ fontSize: 11, color: "#E8950A", transition: "transform .2s", transform: open ? "rotate(90deg)" : "none" }}>{"\u25B6"}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#E8950A" }}>{summary}</span>
+        <span style={{ fontSize: 10, color: "#94A3B8", marginLeft: "auto" }}>{open ? "Cerrar" : "Ver m\u00e1s"}</span>
+      </div>
+      {open && (
+        <div style={{ padding: "8px 14px 14px", borderTop: "1px solid #F1F5F9", background: "#FAFAFA" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RenderBlocks({ blocks }) {
+  return blocks.map((b, idx) => {
+    if (b.type === "section") {
+      return (
+        <div key={idx} style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 12, padding: "14px 18px", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#E8950A", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F1F5F9" }}>{b.title}</div>
+          <RenderBlocks blocks={b.children} />
         </div>
       );
-      continue;
     }
-    if (line.trim()) elements.push(<FormattedLine key={elements.length} line={line} />);
-    i++;
-  }
-  return <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>{elements}</div>;
+    if (b.type === "table") {
+      return <FormattedTable key={idx} headers={b.headers} rows={b.rows} />;
+    }
+    if (b.type === "collapsible") {
+      return (
+        <CollapsibleSection key={idx} summary={b.summary}>
+          <RenderBlocks blocks={b.children} />
+        </CollapsibleSection>
+      );
+    }
+    if (b.type === "line") {
+      return <FormattedLine key={idx} line={(b.isList ? "- " : "") + b.text} />;
+    }
+    return null;
+  });
+}
+
+function FormattedMessage({ text }) {
+  if (!text) return null;
+  const blocks = parseMessageStructure(text);
+  return <div style={{ display: "flex", flexDirection: "column", gap: 2 }}><RenderBlocks blocks={blocks} /></div>;
 }
 
 // ==========================================
@@ -3306,8 +3630,26 @@ function ConsultasPage({ data, saveChat }) {
         )}
         <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
           {ms.map((m, i) => (
-            <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: m.role === "user" ? "80%" : "90%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
-              {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+            <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: m.role === "user" ? "80%" : "90%" }}>
+              <div style={{ background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
+                {m.role === "assistant" ? <FormattedMessage text={m.text} /> : m.text}
+              </div>
+              {m.role === "assistant" && (
+                <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
+                  <button onClick={() => downloadPDF(m.text, ms[i - 1]?.text || "Consulta")} title="Descargar PDF"
+                    style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                    {"\uD83D\uDCC4"} PDF
+                  </button>
+                  <button onClick={() => downloadExcel(m.text, ms[i - 1]?.text || "Consulta")} title="Descargar Excel"
+                    style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                    {"\uD83D\uDCCA"} Excel
+                  </button>
+                </div>
+              )}
             </div>
           ))}
           {ld && <div style={{ alignSelf: "flex-start", padding: "13px 17px", background: "#F8FAFC", borderRadius: 13, border: "1px solid #F1F5F9" }}><div style={{ display: "flex", gap: 5 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "#E8950A", animation: `bounce 1.4s ease ${i * .2}s infinite`, opacity: .5 }} />)}</div></div>}
@@ -5062,8 +5404,26 @@ function GuardadosPage({ data, refresh }) {
         <Card>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "calc(100vh - 250px)", overflow: "auto" }}>
             {msgs.map((m, i) => (
-              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", maxWidth: m.role === "user" ? "80%" : "95%", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
-                {m.role === "assistant" && (m.text.includes('##') || m.text.includes('**') || m.text.includes('\n- ')) ? <FormattedMessage text={m.text} /> : m.text}
+              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: m.role === "user" ? "80%" : "95%" }}>
+                <div style={{ background: m.role === "user" ? "#FEF9EE" : "#F8FAFC", border: `1px solid ${m.role === "user" ? "#FDE68A" : "#F1F5F9"}`, borderRadius: 13, padding: "12px 17px", fontSize: 13.5, color: "#334155", lineHeight: 1.6 }}>
+                  {m.role === "assistant" ? <FormattedMessage text={m.text} /> : m.text}
+                </div>
+                {m.role === "assistant" && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
+                    <button onClick={() => downloadPDF(m.text, msgs[i - 1]?.text || "Consulta")} title="Descargar PDF"
+                      style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.color = "#E8950A"; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                      {"\uD83D\uDCC4"} PDF
+                    </button>
+                    <button onClick={() => downloadExcel(m.text, msgs[i - 1]?.text || "Consulta")} title="Descargar Excel"
+                      style={{ background: "transparent", border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 10.5, color: "#94A3B8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#059669"; e.currentTarget.style.color = "#059669"; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#94A3B8"; }}>
+                      {"\uD83D\uDCCA"} Excel
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -96,8 +96,19 @@ Cuando te den ficha completa de una cabra, analiza TODO:
 - Precio leche: 1.31 euros/L
 
 FORMATO:
-- ## titulos, **negrita**, listas con -, emojis para alertas
+- ## titulos de seccion, **negrita**, listas con -, emojis para alertas
 - Esquematico, NO parrafos largos
+- Para TABLAS de datos (rankings, listas de cabras, comparaciones de 3+ cabras), usa formato markdown:
+  | Crotal | Litros | DEL | Lote |
+  |--------|--------|-----|------|
+  | 057997 | 4.2    | 145 | L1   |
+- Para secciones colapsables (detalles secundarios, listas >15 items), envuelve en:
+  <details>
+  <summary>Titulo de la seccion colapsable</summary>
+  contenido aqui
+  </details>
+- Prioriza tablas cuando hay datos comparables de 3+ cabras con campos comunes
+- Las alertas y recomendaciones van como texto normal, NO en tabla
 
 === ANOMALIAS ===
 Si ves una seccion "ANOMALIAS DETECTADAS" en los datos, SIEMPRE mencionalas al final de tu respuesta. Son errores humanos que el ganadero necesita saber.

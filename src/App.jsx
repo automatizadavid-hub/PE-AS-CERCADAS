@@ -119,68 +119,92 @@ function buildDataContext(data) {
     loteDEL[lote.nombre].dels.push({ crotal: c.crotal, del, litros: p?.litros || 0, cabra_id: c.id, conductividad: p?.conductividad || 0 });
   });
 
+  // Parametros configurables (data-driven en vez de hardcoded)
+  const UMBRAL_DEL_DIFF = 100;
+  const UMBRAL_SECADO_LITROS = 3.0;
+  const UMBRAL_RECIEN_PARIDAS_DEL = 150;
+  const UMBRAL_PARIENDO_DEL = 100;
+  const UMBRAL_GESTANTE_DEL_SECADO = 250;
+  const UMBRAL_ECO_OBSOLETA_DIAS = 90;
+
   Object.entries(loteDEL).forEach(([loteName, info]) => {
     if (info.dels.length < 3) return;
     const avgDEL = info.dels.reduce((s, d) => s + d.del, 0) / info.dels.length;
     const estado = info.lote.estado || 'produccion';
+    const tipo = info.lote.tipo || '';
 
     info.dels.forEach(d => {
-      // 1. DEL muy fuera de rango del lote (>100 días de diferencia con la media)
-      if (Math.abs(d.del - avgDEL) > 100 && d.del > 0) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName}: DEL=${d.del} (media lote=${Math.round(avgDEL)}). Diferencia de ${Math.abs(Math.round(d.del - avgDEL))} días — ¿debería estar en otro lote?`);
+      // 1. DEL muy fuera de rango del lote
+      if (Math.abs(d.del - avgDEL) > UMBRAL_DEL_DIFF && d.del > 0) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName}: DEL=${d.del} (media lote=${Math.round(avgDEL)}). Diferencia de ${Math.abs(Math.round(d.del - avgDEL))} dias — deberia estar en otro lote?`);
       }
 
-      // 2. Cabra en lote secándose pero con producción alta
-      if (estado === 'secandose' && d.litros > 3.0) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName} (SECÁNDOSE) pero produce ${d.litros.toFixed(1)}L — ¿seguro que debe secarse?`);
+      // 2. Cabra en lote secandose pero con produccion alta (data-driven: usa lote.estado)
+      if (estado === 'secandose' && d.litros > UMBRAL_SECADO_LITROS) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (SECANDOSE) pero produce ${d.litros.toFixed(1)}L — seguro que debe secarse?`);
       }
 
-      // 3. Cabra en lote de recién paridas con muchos DEL
-      if ((loteName.includes("Lote 5") || loteName.includes("Lote 13")) && d.del > 150) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName} (recién paridas) pero DEL=${d.del} — debería estar en Lote 1 o 4 para cubrición`);
+      // 3. Cabra en lote de recien paridas con muchos DEL (data-driven: usa lote.tipo o estado)
+      if ((tipo === 'recien_paridas' || estado === 'recien_paridas') && d.del > UMBRAL_RECIEN_PARIDAS_DEL) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (recien paridas) pero DEL=${d.del} — deberia pasar a cubricion`);
       }
 
-      // 4. Cabra en Lote 2 (pariendo) con muchos DEL
-      if (loteName.includes("Lote 2") && d.del > 100) {
-        anomalias.push(`🔍 ${d.crotal} en ${loteName} (pariendo) pero DEL=${d.del} — ¿ya parió y no se movió de lote?`);
+      // 4. Cabra en lote pariendo con muchos DEL (data-driven: usa lote.estado)
+      if (estado === 'pariendo' && d.del > UMBRAL_PARIENDO_DEL) {
+        anomalias.push(`🔍 ${d.crotal} en ${loteName} (pariendo) pero DEL=${d.del} — ya pario y no se movio de lote?`);
       }
     });
   });
 
-  // 5. Vacías del Lote 6 que no se han movido
-  const lote6 = data.lotes.find(l => l.nombre && l.nombre.includes("Lote 6"));
-  if (lote6) {
-    data.cabras.filter(c => c.lote_id === lote6.id).forEach(c => {
-      const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
-      if (ecos.length > 0) {
-        const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
-        if (lastEco.resultado === 'vacia') {
-          anomalias.push(`⚠️ ${c.crotal} sigue en Lote 6 pero última eco fue VACÍA (${lastEco.fecha}) — debería ir a cubrición. Error humano probable.`);
-        }
-      }
-    });
-  }
-
-  // 6. Cabras con ecografía gestante pero en lote de producción sin secado programado
+  // 5. Vacias con ultima eco vacia que no se han movido a cubricion (data-driven: busca por eco resultado, no por nombre lote)
   data.cabras.forEach(c => {
-    const ecos = data.ecografias.filter(e => e.cabra?.crotal === c.crotal);
+    if (!c.lote_id || c.estado === "muerta" || c.estado === "baja") return;
+    const ecos = data.ecografias.filter(e => e.cabra_id === c.id || e.cabra?.crotal === c.crotal);
     if (ecos.length === 0) return;
     const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
-    const lote = data.lotes.find(l => l.id === c.lote_id);
-    if (lastEco.resultado === 'gestante' && lote && (lote.nombre.includes("Lote 1") || lote.nombre.includes("Lote 4"))) {
-      const p = prodById[c.id];
-      const del = p?.dia_lactacion || c.dias_en_leche || 0;
-      if (del > 250) {
-        anomalias.push(`⚠️ ${c.crotal} es GESTANTE (eco ${lastEco.fecha}) y sigue en ${lote.nombre} con DEL=${del} — ¿debería estar en proceso de secado?`);
+    if (lastEco.resultado === 'vacia') {
+      const lote = data.lotes.find(l => l.id === c.lote_id);
+      // Si esta en un lote que NO es de cubricion, deberia moverse
+      if (lote && lote.estado !== 'cubricion' && lote.tipo !== 'cubricion') {
+        anomalias.push(`⚠️ ${c.crotal} en ${lote.nombre}: ultima eco fue VACIA (${lastEco.fecha}) — deberia ir a cubricion`);
       }
     }
   });
 
-  // 7. Cabras sin lote asignado pero con producción
-  data.cabras.filter(c => !c.lote_id).forEach(c => {
+  // 6. Gestantes en lotes de produccion con DEL alto — necesitan secado
+  data.cabras.forEach(c => {
+    const ecos = data.ecografias.filter(e => e.cabra_id === c.id || e.cabra?.crotal === c.crotal);
+    if (ecos.length === 0) return;
+    const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    const lote = data.lotes.find(l => l.id === c.lote_id);
+    // Data-driven: cualquier lote en estado "produccion" (no solo Lote 1/4)
+    if (lastEco.resultado === 'gestante' && lote && (lote.estado === 'produccion' || !lote.estado)) {
+      const p = prodById[c.id];
+      const del = p?.dia_lactacion || c.dias_en_leche || 0;
+      if (del > UMBRAL_GESTANTE_DEL_SECADO) {
+        anomalias.push(`⚠️ ${c.crotal} es GESTANTE (eco ${lastEco.fecha}) y sigue en ${lote.nombre} con DEL=${del} — deberia estar en proceso de secado`);
+      }
+    }
+  });
+
+  // 7. Cabras sin lote asignado pero con produccion
+  data.cabras.filter(c => !c.lote_id && c.estado !== "muerta" && c.estado !== "baja").forEach(c => {
     const p = prodById[c.id];
     if (p && p.litros > 0) {
-      anomalias.push(`🔍 ${c.crotal} produce ${p.litros.toFixed(1)}L pero NO tiene lote asignado — asignar lote.`);
+      anomalias.push(`🔍 ${c.crotal} produce ${p.litros.toFixed(1)}L pero NO tiene lote asignado — asignar lote`);
+    }
+  });
+
+  // 8. NUEVO: Ecografia obsoleta — ultima eco hace >90 dias en cabras activas
+  data.cabras.forEach(c => {
+    if (c.estado === "muerta" || c.estado === "baja" || !c.lote_id) return;
+    const ecos = data.ecografias.filter(e => e.cabra_id === c.id || e.cabra?.crotal === c.crotal);
+    if (ecos.length === 0) return;
+    const lastEco = ecos.sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    const diasDesdeEco = Math.floor((new Date() - new Date(lastEco.fecha)) / 86400000);
+    if (diasDesdeEco > UMBRAL_ECO_OBSOLETA_DIAS) {
+      const lote = data.lotes.find(l => l.id === c.lote_id);
+      anomalias.push(`🔍 ${c.crotal} (${lote?.nombre || "Sin lote"}): ultima eco hace ${diasDesdeEco} dias (${lastEco.fecha}, resultado: ${lastEco.resultado}) — dato posiblemente obsoleto`);
     }
   });
 
@@ -188,8 +212,336 @@ function buildDataContext(data) {
     lines.push(`\n🔍 ANOMALÍAS DETECTADAS (${anomalias.length}) — posibles errores humanos o de gestión:`);
     anomalias.forEach(a => lines.push(`  ${a}`));
   }
-  
+
+  // === INTELIGENCIA FASE 2 ===
+
+  // Tendencias de produccion
+  const { tendencias, resumen: resTendencias } = analizarTendencias(data);
+  if (tendencias.length > 0) {
+    lines.push(`\n📈 TENDENCIAS DE PRODUCCION (${tendencias.length} alertas):`);
+    if (resTendencias) {
+      lines.push(`  Rebano: ${resTendencias.cambioGlobal >= 0 ? '+' : ''}${resTendencias.cambioGlobal.toFixed(1)}% vs dia anterior. ${resTendencias.cabrasEnDeclive} en declive. ${resTendencias.mastitisProbable} mastitis probables.`);
+    }
+    tendencias.slice(0, 15).forEach(t => {
+      lines.push(`  ${t.severidad === "alta" ? "🔴" : t.severidad === "media" ? "🟡" : "🟢"} ${t.tipo} ${t.crotal} (${t.lote}): ${t.detalle}${t.conductividad > 6.0 ? ` [cond: ${t.conductividad}]` : ""}`);
+    });
+  }
+
+  // Evaluacion de tratamientos
+  const { porProducto } = evaluarTratamientos(data);
+  const prodEntries = Object.values(porProducto).filter(p => p.total >= 2);
+  if (prodEntries.length > 0) {
+    lines.push(`\n💊 EFECTIVIDAD DE TRATAMIENTOS:`);
+    prodEntries.forEach(p => {
+      lines.push(`  ${p.tipo}/${p.producto}: ${p.tasaEfectividad}% efectivo (${p.efectivo}/${p.total} casos)`);
+    });
+  }
+
+  // Timeline reproductivo
+  const { alertas: alertasRepro, proximos } = calcularTimelineReproductivo(data);
+  if (alertasRepro.length > 0 || proximos.length > 0) {
+    lines.push(`\n🔄 TIMELINE REPRODUCTIVO:`);
+    if (alertasRepro.length > 0) {
+      lines.push(`  ⚠️ Alertas (${alertasRepro.length}):`);
+      alertasRepro.slice(0, 10).forEach(a => {
+        lines.push(`    ${a.severidad === "alta" ? "🔴" : "🟡"} ${a.tipo} ${a.crotal} (${a.lote}): ${a.detalle}`);
+      });
+    }
+    if (proximos.length > 0) {
+      lines.push(`  📅 Proximos eventos (${proximos.length}):`);
+      proximos.slice(0, 10).forEach(p => {
+        lines.push(`    ${p.tipo} ${p.crotal} (${p.lote}): ${p.detalle}`);
+      });
+    }
+  }
+
   return lines.join("\n");
+}
+
+// ==========================================
+// MOTOR DE INTELIGENCIA — Fase 2
+// ==========================================
+
+// 2.1 Analisis de tendencias de produccion
+function analizarTendencias(data) {
+  if (!data || !data.produccion || data.produccion.length === 0) return { tendencias: [], resumen: null };
+
+  const prod = data.produccion;
+  const fechas = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
+  if (fechas.length < 2) return { tendencias: [], resumen: null };
+
+  const tendencias = [];
+
+  // Agrupar produccion por cabra
+  const porCabra = {};
+  prod.forEach(p => {
+    if (!porCabra[p.cabra_id]) porCabra[p.cabra_id] = [];
+    porCabra[p.cabra_id].push(p);
+  });
+
+  // Para cada cabra con 3+ dias de datos
+  Object.entries(porCabra).forEach(([cabraId, registros]) => {
+    const sorted = registros.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    if (sorted.length < 3) return;
+
+    const cabra = data.cabras.find(c => c.id === parseInt(cabraId));
+    if (!cabra) return;
+    const lote = data.lotes.find(l => l.id === cabra.lote_id);
+    if (lote && lote.estado === "secandose") return; // Ignorar lotes secandose
+
+    const ultimos7 = sorted.slice(-7);
+    const ultimo = ultimos7[ultimos7.length - 1];
+    const penultimo = ultimos7.length >= 2 ? ultimos7[ultimos7.length - 2] : null;
+    const antepenultimo = ultimos7.length >= 3 ? ultimos7[ultimos7.length - 3] : null;
+
+    // Caida brusca: >25% en un dia, con produccion previa >0.5L
+    if (penultimo && penultimo.litros > 0.5 && ultimo.litros > 0) {
+      const cambio = ((ultimo.litros - penultimo.litros) / penultimo.litros) * 100;
+      if (cambio < -25) {
+        const condAlta = ultimo.conductividad > 6.0;
+        tendencias.push({
+          tipo: condAlta ? "MASTITIS_PROBABLE" : "CAIDA_BRUSCA",
+          crotal: cabra.crotal,
+          lote: lote?.nombre || "Sin lote",
+          detalle: `${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (${cambio.toFixed(0)}%)`,
+          conductividad: ultimo.conductividad,
+          severidad: condAlta ? "alta" : "media",
+          fechas: `${penultimo.fecha} -> ${ultimo.fecha}`,
+        });
+      }
+    }
+
+    // Declive progresivo: caida >15% en ultimos 3 registros
+    if (antepenultimo && antepenultimo.litros > 0.5) {
+      const cambio3d = ((ultimo.litros - antepenultimo.litros) / antepenultimo.litros) * 100;
+      if (cambio3d < -15 && ultimo.litros < penultimo.litros && penultimo.litros < antepenultimo.litros) {
+        const yaDetectada = tendencias.some(t => t.crotal === cabra.crotal && (t.tipo === "CAIDA_BRUSCA" || t.tipo === "MASTITIS_PROBABLE"));
+        if (!yaDetectada) {
+          tendencias.push({
+            tipo: "DECLIVE",
+            crotal: cabra.crotal,
+            lote: lote?.nombre || "Sin lote",
+            detalle: `${antepenultimo.litros.toFixed(1)}L -> ${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (${cambio3d.toFixed(0)}% en 3 dias)`,
+            conductividad: ultimo.conductividad,
+            severidad: "media",
+            fechas: `${antepenultimo.fecha} -> ${ultimo.fecha}`,
+          });
+        }
+      }
+    }
+
+    // Subida post-tratamiento: >30% subida + tratamiento en ultimos 7 dias
+    if (penultimo && penultimo.litros > 0.3) {
+      const subida = ((ultimo.litros - penultimo.litros) / penultimo.litros) * 100;
+      if (subida > 30) {
+        const tratReciente = (data.tratamientos || []).find(t =>
+          t.cabra_id === parseInt(cabraId) &&
+          t.fecha >= ultimos7[0].fecha
+        );
+        if (tratReciente) {
+          tendencias.push({
+            tipo: "RESPUESTA_TRATAMIENTO",
+            crotal: cabra.crotal,
+            lote: lote?.nombre || "Sin lote",
+            detalle: `${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (+${subida.toFixed(0)}%) tras ${tratReciente.tipo}: ${tratReciente.producto || "s/n"}`,
+            conductividad: ultimo.conductividad,
+            severidad: "info",
+            fechas: `${penultimo.fecha} -> ${ultimo.fecha}`,
+          });
+        }
+      }
+    }
+  });
+
+  // Tendencia global del rebano
+  const resumen = {};
+  if (fechas.length >= 2) {
+    const dia1 = prod.filter(p => p.fecha === fechas[0]);
+    const dia2 = prod.filter(p => p.fecha === fechas[1]);
+    const total1 = dia1.reduce((s, p) => s + (p.litros || 0), 0);
+    const total2 = dia2.reduce((s, p) => s + (p.litros || 0), 0);
+    const media1 = dia1.length > 0 ? total1 / dia1.length : 0;
+    const media2 = dia2.length > 0 ? total2 / dia2.length : 0;
+    resumen.mediaHoy = media1;
+    resumen.mediaAyer = media2;
+    resumen.cambioGlobal = media2 > 0 ? ((media1 - media2) / media2 * 100) : 0;
+    resumen.cabrasEnDeclive = tendencias.filter(t => t.tipo === "DECLIVE" || t.tipo === "CAIDA_BRUSCA").length;
+    resumen.mastitisProbable = tendencias.filter(t => t.tipo === "MASTITIS_PROBABLE").length;
+    resumen.respuestasTratamiento = tendencias.filter(t => t.tipo === "RESPUESTA_TRATAMIENTO").length;
+  }
+
+  return { tendencias: tendencias.sort((a, b) => (a.severidad === "alta" ? 0 : 1) - (b.severidad === "alta" ? 0 : 1)), resumen };
+}
+
+// 2.2 Correlacion tratamiento -> resultado
+function evaluarTratamientos(data) {
+  if (!data || !data.tratamientos || data.tratamientos.length === 0) return { evaluaciones: [], porProducto: {} };
+
+  const prod = data.produccion || [];
+  const evaluaciones = [];
+
+  data.tratamientos.forEach(trat => {
+    if (!trat.cabra_id || !trat.fecha) return;
+    const cabra = data.cabras.find(c => c.id === trat.cabra_id);
+    if (!cabra) return;
+
+    const prodCabra = prod.filter(p => p.cabra_id === trat.cabra_id).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    if (prodCabra.length < 3) return;
+
+    // Produccion 7 dias antes del tratamiento
+    const antes = prodCabra.filter(p => p.fecha < trat.fecha).slice(-7);
+    // Produccion 7 dias despues del tratamiento
+    const despues = prodCabra.filter(p => p.fecha > trat.fecha).slice(0, 7);
+
+    if (antes.length < 2 || despues.length < 2) return;
+
+    const mediaAntes = antes.reduce((s, p) => s + (p.litros || 0), 0) / antes.length;
+    const mediaDespues = despues.reduce((s, p) => s + (p.litros || 0), 0) / despues.length;
+    const condAntes = antes.reduce((s, p) => s + (p.conductividad || 0), 0) / antes.length;
+    const condDespues = despues.reduce((s, p) => s + (p.conductividad || 0), 0) / despues.length;
+
+    const cambioProd = mediaAntes > 0 ? ((mediaDespues - mediaAntes) / mediaAntes * 100) : 0;
+    const cambioCond = condAntes > 0 ? ((condDespues - condAntes) / condAntes * 100) : 0;
+
+    let resultado = "sin_cambio";
+    if (cambioProd > 10 || cambioCond < -10) resultado = "efectivo";
+    else if (cambioProd < -10 || cambioCond > 10) resultado = "ineficaz";
+
+    evaluaciones.push({
+      crotal: cabra.crotal,
+      tipo: trat.tipo,
+      producto: trat.producto || "Sin especificar",
+      fecha: trat.fecha,
+      mediaAntes: mediaAntes.toFixed(2),
+      mediaDespues: mediaDespues.toFixed(2),
+      cambioProd: cambioProd.toFixed(1),
+      condAntes: condAntes.toFixed(2),
+      condDespues: condDespues.toFixed(2),
+      cambioCond: cambioCond.toFixed(1),
+      resultado,
+    });
+  });
+
+  // Agregar por producto
+  const porProducto = {};
+  evaluaciones.forEach(e => {
+    const key = `${e.tipo}:${e.producto}`;
+    if (!porProducto[key]) porProducto[key] = { tipo: e.tipo, producto: e.producto, total: 0, efectivo: 0, ineficaz: 0, sin_cambio: 0 };
+    porProducto[key].total++;
+    porProducto[key][e.resultado]++;
+  });
+
+  // Calcular tasa de efectividad
+  Object.values(porProducto).forEach(p => {
+    p.tasaEfectividad = p.total > 0 ? Math.round(p.efectivo / p.total * 100) : 0;
+  });
+
+  return { evaluaciones, porProducto };
+}
+
+// 2.3 Timeline reproductivo automatico
+function calcularTimelineReproductivo(data) {
+  if (!data) return { alertas: [], proximos: [] };
+
+  const hoy = new Date();
+  const hoyStr = hoy.toISOString().split("T")[0];
+  const alertas = [];
+  const proximos = [];
+
+  // Para cada cubricion, calcular fechas esperadas
+  (data.cubriciones || []).forEach(cub => {
+    if (!cub.fecha_entrada) return;
+    const cabra = data.cabras.find(c => c.id === cub.cabra_id);
+    if (!cabra || cabra.estado === "muerta" || cabra.estado === "baja") return;
+
+    const fechaCub = new Date(cub.fecha_entrada);
+    const fechaEcoEsperada = new Date(fechaCub); fechaEcoEsperada.setDate(fechaEcoEsperada.getDate() + 65);
+    const fechaPartoEsperado = new Date(fechaCub); fechaPartoEsperado.setDate(fechaPartoEsperado.getDate() + 150);
+    const fechaSecado = new Date(fechaPartoEsperado); fechaSecado.setDate(fechaSecado.getDate() - 60);
+
+    const fechaEcoStr = fechaEcoEsperada.toISOString().split("T")[0];
+    const fechaPartoStr = fechaPartoEsperado.toISOString().split("T")[0];
+    const fechaSecadoStr = fechaSecado.toISOString().split("T")[0];
+
+    // Verificar si ya tiene ecografia posterior a la cubricion
+    const tieneEco = (data.ecografias || []).some(e =>
+      e.cabra_id === cub.cabra_id && e.fecha >= cub.fecha_entrada
+    );
+
+    // Verificar si ya tiene parto posterior a la cubricion
+    const tieneParto = (data.partos || []).some(p =>
+      p.cabra_id === cub.cabra_id && p.fecha >= cub.fecha_entrada
+    );
+
+    const lote = data.lotes.find(l => l.id === cabra.lote_id);
+    const crotal = cabra.crotal;
+    const loteNombre = lote?.nombre || "Sin lote";
+
+    // Ecografia pendiente
+    if (!tieneEco && hoyStr >= fechaEcoStr) {
+      const diasRetraso = Math.floor((hoy - fechaEcoEsperada) / 86400000);
+      alertas.push({
+        tipo: "ECO_PENDIENTE",
+        crotal,
+        lote: loteNombre,
+        detalle: `Cubricion ${cub.fecha_entrada}, eco esperada ${fechaEcoStr} (${diasRetraso} dias de retraso)`,
+        severidad: diasRetraso > 15 ? "alta" : "media",
+        fechaEsperada: fechaEcoStr,
+      });
+    }
+
+    // Ecografia proxima (en los proximos 15 dias)
+    if (!tieneEco && hoyStr < fechaEcoStr) {
+      const diasHasta = Math.floor((fechaEcoEsperada - hoy) / 86400000);
+      if (diasHasta <= 15) {
+        proximos.push({ tipo: "ECO_PROXIMA", crotal, lote: loteNombre, fecha: fechaEcoStr, diasHasta, detalle: `Eco en ${diasHasta} dias` });
+      }
+    }
+
+    // Secado urgente — verificar si ya paso la fecha y sigue en produccion
+    if (!tieneParto && hoyStr >= fechaSecadoStr) {
+      const enProduccion = lote && (lote.estado === "produccion" || !lote.estado);
+      if (enProduccion) {
+        const diasRetraso = Math.floor((hoy - fechaSecado) / 86400000);
+        alertas.push({
+          tipo: "SECADO_URGENTE",
+          crotal,
+          lote: loteNombre,
+          detalle: `Parto esperado ${fechaPartoStr}, secado debio empezar ${fechaSecadoStr} (${diasRetraso} dias de retraso)`,
+          severidad: "alta",
+          fechaEsperada: fechaSecadoStr,
+        });
+      }
+    }
+
+    // Parto proximo (en los proximos 30 dias)
+    if (!tieneParto && hoyStr < fechaPartoStr) {
+      const diasHasta = Math.floor((fechaPartoEsperado - hoy) / 86400000);
+      if (diasHasta <= 30) {
+        proximos.push({ tipo: "PARTO_PROXIMO", crotal, lote: loteNombre, fecha: fechaPartoStr, diasHasta, detalle: `Parto en ~${diasHasta} dias` });
+      }
+    }
+
+    // Parto no registrado — deberia haber parido pero no hay registro
+    if (!tieneParto && hoyStr > fechaPartoStr) {
+      const diasRetraso = Math.floor((hoy - fechaPartoEsperado) / 86400000);
+      if (diasRetraso > 7) {
+        alertas.push({
+          tipo: "PARTO_NO_REGISTRADO",
+          crotal,
+          lote: loteNombre,
+          detalle: `Parto esperado ${fechaPartoStr}, ${diasRetraso} dias sin registro. Posible parto no registrado o aborto.`,
+          severidad: diasRetraso > 20 ? "alta" : "media",
+          fechaEsperada: fechaPartoStr,
+        });
+      }
+    }
+  });
+
+  return {
+    alertas: alertas.sort((a, b) => (a.severidad === "alta" ? 0 : 1) - (b.severidad === "alta" ? 0 : 1)),
+    proximos: proximos.sort((a, b) => a.diasHasta - b.diasHasta)
+  };
 }
 
 // ==========================================
@@ -503,6 +855,65 @@ function CabraHistorialModal({ crotal, data, onClose }) {
               <div style={{ fontSize: 10, color: "#94A3B8" }}>Partos</div>
             </div>
           </div>
+
+          {/* Intelligence Scores */}
+          {(() => {
+            // Score de salud: conductividad media + tratamientos recientes
+            const condMedia = prod.length > 0 ? prod.slice(0, 10).reduce((s, p) => s + (p.conductividad || 0), 0) / Math.min(prod.length, 10) : 0;
+            const tratRecientes = trats.filter(t => { const d = new Date(t.fecha); return (new Date() - d) < 90 * 86400000; }).length;
+            const scoreSalud = Math.max(0, Math.min(100, 100 - (condMedia > 6.5 ? 40 : condMedia > 6.0 ? 20 : 0) - (tratRecientes * 10)));
+
+            // Score reproductivo: tasa gestacion, intervalos, abortos
+            const totalEcos = ecos.length;
+            const gestantes = ecos.filter(e => e.resultado === "gestante" || e.resultado === "prenada").length;
+            const tasaGest = totalEcos > 0 ? (gestantes / totalEcos * 100) : null;
+            const abortos = partos.filter(p => p.tipo === "aborto").length;
+            const scoreRepro = tasaGest !== null ? Math.max(0, Math.min(100, tasaGest - (abortos * 20) - (vaciaCount >= 2 ? 30 : 0))) : null;
+
+            // Score economico: litros totales / dias produccion
+            const litrosTotales = prod.reduce((s, p) => s + (p.litros || 0), 0);
+            const diasProd = prod.length;
+            const eficiencia = diasProd > 0 ? litrosTotales / diasProd : 0;
+            const precioLeche = 1.31;
+            const valorGenerado = litrosTotales * precioLeche;
+            const scoreEconomico = Math.max(0, Math.min(100, eficiencia > 3.0 ? 95 : eficiencia > 2.5 ? 80 : eficiencia > 2.0 ? 65 : eficiencia > 1.5 ? 45 : eficiencia > 1.0 ? 25 : 10));
+
+            const colorScore = (s) => s >= 70 ? "#059669" : s >= 40 ? "#E8950A" : "#DC2626";
+            const labelScore = (s) => s >= 70 ? "Bueno" : s >= 40 ? "Vigilar" : "Critico";
+
+            // Madre en el rebano?
+            const madre = cabra.madre_id ? data.cabras.find(c => c.id === cabra.madre_id) : null;
+            const madreProd = madre ? (data.produccion || []).filter(p => p.cabra_id === madre.id).slice(0, 5) : [];
+            const madreLitros = madreProd.length > 0 ? madreProd.reduce((s, p) => s + (p.litros || 0), 0) / madreProd.length : null;
+
+            return (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B", marginBottom: 10 }}>🧠 Inteligencia</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 10 }}>
+                  <div style={{ textAlign: "center", padding: "10px 8px", background: `${colorScore(scoreSalud)}10`, borderRadius: 10, border: `1px solid ${colorScore(scoreSalud)}30` }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: colorScore(scoreSalud), fontFamily: "'Space Mono', monospace" }}>{scoreSalud}</div>
+                    <div style={{ fontSize: 10, color: "#64748B" }}>Salud</div>
+                    <div style={{ fontSize: 9, color: colorScore(scoreSalud), fontWeight: 600 }}>{labelScore(scoreSalud)}</div>
+                  </div>
+                  <div style={{ textAlign: "center", padding: "10px 8px", background: scoreRepro !== null ? `${colorScore(scoreRepro)}10` : "#F8FAFC", borderRadius: 10, border: `1px solid ${scoreRepro !== null ? colorScore(scoreRepro) + "30" : "#E2E8F0"}` }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: scoreRepro !== null ? colorScore(scoreRepro) : "#94A3B8", fontFamily: "'Space Mono', monospace" }}>{scoreRepro !== null ? scoreRepro.toFixed(0) : "-"}</div>
+                    <div style={{ fontSize: 10, color: "#64748B" }}>Reproductivo</div>
+                    <div style={{ fontSize: 9, color: scoreRepro !== null ? colorScore(scoreRepro) : "#94A3B8", fontWeight: 600 }}>{scoreRepro !== null ? labelScore(scoreRepro) : "Sin datos"}</div>
+                  </div>
+                  <div style={{ textAlign: "center", padding: "10px 8px", background: `${colorScore(scoreEconomico)}10`, borderRadius: 10, border: `1px solid ${colorScore(scoreEconomico)}30` }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: colorScore(scoreEconomico), fontFamily: "'Space Mono', monospace" }}>{scoreEconomico}</div>
+                    <div style={{ fontSize: 10, color: "#64748B" }}>Economico</div>
+                    <div style={{ fontSize: 9, color: colorScore(scoreEconomico), fontWeight: 600 }}>{eficiencia.toFixed(1)}L/dia</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 11, color: "#64748B", background: "#F8FAFC", padding: "4px 10px", borderRadius: 8 }}>Valor generado: <strong style={{ color: "#059669" }}>{valorGenerado.toFixed(0)}\u20AC</strong> ({diasProd} dias)</div>
+                  {crias.length > 0 && <div style={{ fontSize: 11, color: "#64748B", background: "#F8FAFC", padding: "4px 10px", borderRadius: 8 }}>Crias: <strong>{crias.length}</strong> ({crias.filter(c => c.sexo === "hembra").length}H)</div>}
+                  {madre && <div style={{ fontSize: 11, color: "#7C3AED", background: "#F5F3FF", padding: "4px 10px", borderRadius: 8 }}>Madre: <strong>{madre.crotal}</strong>{madreLitros ? ` (${madreLitros.toFixed(1)}L/dia)` : ""}</div>}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Production history */}
           {prod.length > 0 && (

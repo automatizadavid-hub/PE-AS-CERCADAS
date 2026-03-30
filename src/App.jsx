@@ -1307,6 +1307,141 @@ function DashboardPage({ data }) {
         )}
       </div>
 
+      {/* === INTELIGENCIA DEL DIA === */}
+      {(() => {
+        const tendencias = analizarTendencias(data);
+        const repro = calcularTimelineReproductivo(data);
+        const trats = evaluarTratamientos(data);
+        const ultimoResumen = (data.resumenes || []).find(r => r.hallazgos);
+
+        const criticas = tendencias.tendencias.filter(t => t.severidad === "alta");
+        const declives = tendencias.tendencias.filter(t => t.tipo === "DECLIVE");
+        const respuestas = tendencias.tendencias.filter(t => t.tipo === "RESPUESTA_TRATAMIENTO");
+        const secadosUrg = repro.alertas.filter(a => a.tipo === "SECADO_URGENTE");
+        const ecosPend = repro.alertas.filter(a => a.tipo === "ECO_PENDIENTE");
+        const partosNR = repro.alertas.filter(a => a.tipo === "PARTO_NO_REGISTRADO");
+        const proxEventos = repro.proximos.slice(0, 5);
+        const tratsBajos = Object.values(trats.porProducto).filter(p => p.tasaEfectividad < 50 && p.total >= 2);
+
+        const hayAlgo = criticas.length > 0 || declives.length > 0 || secadosUrg.length > 0 || ecosPend.length > 0 || partosNR.length > 0 || proxEventos.length > 0 || respuestas.length > 0 || tratsBajos.length > 0;
+        if (!hayAlgo && !tendencias.resumen) return null;
+
+        return (
+          <Card>
+            <SectionTitle icon="\uD83E\uDDE0" text="Inteligencia del D\u00eda" color="#7C3AED" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+
+              {/* Tendencia global */}
+              {tendencias.resumen && (
+                <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", marginBottom: 8 }}>\uD83D\uDCC8 Tendencia del Reba\u00f1o</div>
+                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: tendencias.resumen.cambioGlobal >= 0 ? "#059669" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>
+                      {tendencias.resumen.cambioGlobal >= 0 ? "+" : ""}{tendencias.resumen.cambioGlobal.toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748B", lineHeight: 1.5 }}>
+                      Media: {tendencias.resumen.mediaHoy?.toFixed(2)}L/cabra<br />
+                      vs {tendencias.resumen.mediaAyer?.toFixed(2)}L d\u00eda anterior
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Alertas criticas */}
+              {criticas.length > 0 && (
+                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 8 }}>\uD83D\uDD34 Cr\u00edticas ({criticas.length})</div>
+                  {criticas.slice(0, 5).map((t, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "4px 0", borderBottom: i < Math.min(criticas.length, 5) - 1 ? "1px solid #FEE2E2" : "none" }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
+                      <span style={{ marginLeft: 8, color: "#64748B" }}>{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} — {t.detalle}</span>
+                    </div>
+                  ))}
+                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>+ {criticas.length - 5} m\u00e1s</div>}
+                </div>
+              )}
+
+              {/* Reproductivo */}
+              {(secadosUrg.length > 0 || ecosPend.length > 0 || partosNR.length > 0) && (
+                <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#EA580C", marginBottom: 8 }}>\uD83D\uDD04 Reproductivo</div>
+                  {secadosUrg.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      \u26A0\uFE0F <strong>{secadosUrg.length}</strong> secados urgentes: {secadosUrg.slice(0, 4).map(a => a.crotal).join(", ")}{secadosUrg.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                  {ecosPend.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      \uD83D\uDD2C <strong>{ecosPend.length}</strong> ecograf\u00edas pendientes: {ecosPend.slice(0, 4).map(a => a.crotal).join(", ")}{ecosPend.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                  {partosNR.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#DC2626", padding: "4px 0" }}>
+                      \uD83D\uDEA8 <strong>{partosNR.length}</strong> partos sin registrar: {partosNR.slice(0, 4).map(a => a.crotal).join(", ")}{partosNR.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Proximos eventos */}
+              {proxEventos.length > 0 && (
+                <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#2563EB", marginBottom: 8 }}>\uD83D\uDCC5 Pr\u00f3ximos Eventos</div>
+                  {proxEventos.map((e, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 600 }}>{e.crotal}</span>
+                      <span style={{ marginLeft: 8, color: "#64748B" }}>{e.detalle}</span>
+                      <span style={{ marginLeft: 6, fontSize: 10, color: "#2563EB", fontWeight: 600 }}>en {e.diasHasta}d</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Declives + respuestas tratamiento */}
+              {(declives.length > 0 || respuestas.length > 0) && (
+                <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 8 }}>\uD83D\uDCCA Tendencias Individuales</div>
+                  {declives.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      \uD83D\uDCC9 <strong>{declives.length}</strong> cabras en declive: {declives.slice(0, 4).map(t => t.crotal).join(", ")}{declives.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                  {respuestas.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#059669", padding: "4px 0" }}>
+                      \u2705 <strong>{respuestas.length}</strong> respondiendo a tratamiento: {respuestas.slice(0, 4).map(t => t.crotal).join(", ")}{respuestas.length > 4 ? "..." : ""}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tratamientos con baja efectividad */}
+              {tratsBajos.length > 0 && (
+                <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#D97706", marginBottom: 8 }}>\uD83D\uDC8A Tratamientos a Revisar</div>
+                  {tratsBajos.map((t, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
+                      <strong>{t.producto}</strong> ({t.tipo}): {t.tasaEfectividad}% efectividad ({t.efectivo}/{t.total} casos)
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Ultimo resumen guardado */}
+              {ultimoResumen && (
+                <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 11, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 8 }}>\uD83D\uDCBE \u00DAltima Importaci\u00f3n</div>
+                  <div style={{ fontSize: 12, color: "#64748B" }}>
+                    {new Date(ultimoResumen.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })} — {ultimoResumen.total_cabras} cabras, {ultimoResumen.litros_totales?.toFixed(0)}L totales
+                  </div>
+                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas cr\u00edticas detectadas</div>}
+                  {ultimoResumen.timeline_alertas > 0 && <div style={{ fontSize: 11, color: "#EA580C", marginTop: 2 }}>{ultimoResumen.timeline_alertas} alertas reproductivas</div>}
+                </div>
+              )}
+            </div>
+          </Card>
+        );
+      })()}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         <Card>
           <SectionTitle icon="⚠️" text="Alertas y Advertencias" color="#DC2626" />
@@ -2478,11 +2613,66 @@ function ImportadorPage({ data, refresh, saveChat }) {
             )}
             {importResult.alertas && importResult.alertas.length > 0 && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>🚨 Alertas ({importResult.alertas.length})</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 6 }}>{"\uD83D\uDEA8"} Alertas ({importResult.alertas.length})</div>
                 {importResult.alertas.slice(0, 8).map((a, i) => (
                   <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0", borderBottom: "1px solid #F1F5F9" }}>{a.msg}</div>
                 ))}
-                {importResult.alertas.length > 8 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>...y {importResult.alertas.length - 8} más</div>}
+                {importResult.alertas.length > 8 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>...y {importResult.alertas.length - 8} m\u00e1s</div>}
+              </div>
+            )}
+            {/* === PANEL INTELIGENCIA POST-IMPORTACION === */}
+            {importResult.hallazgos && (
+              <div style={{ marginTop: 12, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 11, padding: "14px 16px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED", marginBottom: 10 }}>{"\uD83E\uDDE0"} An\u00e1lisis Autom\u00e1tico</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginBottom: 10 }}>
+                  {importResult.tendenciasCriticas > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#FEF2F2", borderRadius: 8, border: "1px solid #FECACA" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#DC2626", fontFamily: "'Space Mono', monospace" }}>{importResult.tendenciasCriticas}</div>
+                      <div style={{ fontSize: 9.5, color: "#DC2626" }}>Alertas cr\u00edticas</div>
+                    </div>
+                  )}
+                  {importResult.tendenciasTotal > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#FFFBEB", borderRadius: 8, border: "1px solid #FDE68A" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#D97706", fontFamily: "'Space Mono', monospace" }}>{importResult.tendenciasTotal}</div>
+                      <div style={{ fontSize: 9.5, color: "#D97706" }}>Tendencias</div>
+                    </div>
+                  )}
+                  {importResult.reproAlertas > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#FFF7ED", borderRadius: 8, border: "1px solid #FED7AA" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#EA580C", fontFamily: "'Space Mono', monospace" }}>{importResult.reproAlertas}</div>
+                      <div style={{ fontSize: 9.5, color: "#EA580C" }}>Repro alertas</div>
+                    </div>
+                  )}
+                  {importResult.proximosEventos > 0 && (
+                    <div style={{ textAlign: "center", padding: "8px 6px", background: "#EFF6FF", borderRadius: 8, border: "1px solid #BFDBFE" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#2563EB", fontFamily: "'Space Mono', monospace" }}>{importResult.proximosEventos}</div>
+                      <div style={{ fontSize: 9.5, color: "#2563EB" }}>Eventos pr\u00f3ximos</div>
+                    </div>
+                  )}
+                </div>
+                {/* Detalle de hallazgos criticos */}
+                {importResult.hallazgos.tendencias && importResult.hallazgos.tendencias.filter(t => t.severidad === "alta").length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", marginBottom: 4 }}>{"\uD83D\uDD34"} Requieren acci\u00f3n inmediata:</div>
+                    {importResult.hallazgos.tendencias.filter(t => t.severidad === "alta").slice(0, 5).map((t, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0" }}>
+                        <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
+                        {" "}{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} — {t.detalle}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {importResult.hallazgos.alertasReproductivas && importResult.hallazgos.alertasReproductivas.filter(a => a.severidad === "alta").length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#EA580C", marginBottom: 4 }}>{"\uD83D\uDD04"} Reproductivo urgente:</div>
+                    {importResult.hallazgos.alertasReproductivas.filter(a => a.severidad === "alta").slice(0, 5).map((a, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#475569", padding: "3px 0" }}>
+                        <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#EA580C" }}>{a.crotal}</span>
+                        {" "}{a.tipo.replace(/_/g, " ")} — {a.detalle}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {importResult.errors > 0 && (

@@ -1857,24 +1857,76 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     // Create daily summary
+    // === ANALISIS DIARIO AUTOMATICO POST-IMPORTACION ===
+    // Refrescar datos antes del analisis para tener los nuevos registros
+    const freshData = { ...data };
+    // Ejecutar motores de inteligencia
+    const analisisTendencias = analizarTendencias(freshData);
+    const analisisTratamientos = evaluarTratamientos(freshData);
+    const analisisRepro = calcularTimelineReproductivo(freshData);
+
+    const hallazgos = {
+      tendencias: analisisTendencias.tendencias.slice(0, 20),
+      resumenTendencias: analisisTendencias.resumen,
+      tratamientosEfectividad: Object.values(analisisTratamientos.porProducto),
+      alertasReproductivas: analisisRepro.alertas.slice(0, 20),
+      proximosEventos: analisisRepro.proximos.slice(0, 20),
+      timestamp: new Date().toISOString(),
+    };
+
+    const tendCriticas = analisisTendencias.tendencias.filter(t => t.severidad === "alta").length;
+    const reproAlertas = analisisRepro.alertas.length;
+
     await supabase.from("resumen_diario").upsert([{
       fecha: reportDate, total_cabras: dataRows.length,
       litros_totales: Math.round(totalLitros * 100) / 100,
       media_litros: Math.round(totalLitros / dataRows.length * 1000) / 1000,
       cabras_alta_conductividad: alertas.filter(a => a.msg.includes("conductividad")).length,
       archivo_origen: fileName,
+      hallazgos,
+      tendencias_criticas: tendCriticas,
+      timeline_alertas: reproAlertas,
+      anomalias_nuevas: analisisTendencias.tendencias.length,
     }], { onConflict: "fecha" });
 
-    setImportResult({ imported, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length });
+    setImportResult({
+      imported, errors, newCabras, loteChanges, totalLitros, alertas, errorList, total: dataRows.length,
+      // Inteligencia
+      hallazgos,
+      tendenciasCriticas: tendCriticas,
+      reproAlertas,
+      tendenciasTotal: analisisTendencias.tendencias.length,
+      proximosEventos: analisisRepro.proximos.length,
+    });
     await supabase.from("importacion").insert([{ nombre_archivo: fileName || "produccion.csv", tipo: "produccion", registros_procesados: imported, registros_con_error: errors, errores: errorList.length > 0 ? errorList.slice(0, 50) : null }]);
     setImporting(false);
     refresh();
 
-    // Add result to chat
+    // Add result to chat — ahora con inteligencia
     let chatMsg = `✅ Importación completada:\n• ${imported}/${dataRows.length} registros de producción importados\n• ${totalLitros.toFixed(1)} litros totales hoy\n• ${loteChanges} cambios de lote detectados`;
     if (newCabras > 0) chatMsg += `\n• ${newCabras} cabras nuevas creadas`;
     if (errors > 0) chatMsg += `\n• 🔴 ${errors} errores:\n${errorList.slice(0, 10).map(e => `  - ${e}`).join("\n")}`;
     if (alertas.length > 0) chatMsg += `\n\n🚨 ALERTAS (${alertas.length}):\n${alertas.slice(0, 10).map(a => a.msg).join("\n")}`;
+
+    // Resumen de inteligencia automatica
+    chatMsg += `\n\n🧠 **ANÁLISIS AUTOMÁTICO:**`;
+    if (analisisTendencias.resumen) {
+      const r = analisisTendencias.resumen;
+      chatMsg += `\n📈 Producción: ${r.cambioGlobal >= 0 ? '+' : ''}${r.cambioGlobal.toFixed(1)}% vs día anterior`;
+      if (r.cabrasEnDeclive > 0) chatMsg += `\n⚠️ ${r.cabrasEnDeclive} cabras en declive`;
+      if (r.mastitisProbable > 0) chatMsg += `\n🔴 ${r.mastitisProbable} posibles mastitis (caída + conductividad alta)`;
+      if (r.respuestasTratamiento > 0) chatMsg += `\n✅ ${r.respuestasTratamiento} cabras respondiendo bien a tratamiento`;
+    }
+    if (analisisRepro.alertas.length > 0) {
+      chatMsg += `\n🔄 ${analisisRepro.alertas.length} alertas reproductivas`;
+      const secados = analisisRepro.alertas.filter(a => a.tipo === "SECADO_URGENTE");
+      const ecosPend = analisisRepro.alertas.filter(a => a.tipo === "ECO_PENDIENTE");
+      if (secados.length > 0) chatMsg += ` (${secados.length} secados urgentes)`;
+      if (ecosPend.length > 0) chatMsg += ` (${ecosPend.length} ecos pendientes)`;
+    }
+    if (analisisRepro.proximos.length > 0) {
+      chatMsg += `\n📅 ${analisisRepro.proximos.length} eventos próximos`;
+    }
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 

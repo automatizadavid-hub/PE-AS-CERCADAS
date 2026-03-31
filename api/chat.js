@@ -33,30 +33,41 @@ El codigo ya ha calculado: DEL proyectado = DEL actual + dias hasta que entren l
 Tu NO tienes que calcular nada. Solo usa los datos que te llegan.
 SOLO RECOMIENDA CABRAS DE LA LISTA DE APTAS. Las NO_APTAS estan ahi para que sepas por que se descartaron.
 
+PRODUCCION DE REFERENCIA: promedio ultimos 10 dias (p10d). NO la produccion de un solo dia.
+- Buena productora: >=2.5L (p10d)
+- Media productora: 1.5-2.5L (p10d)
+- Mala productora: <1.5L (p10d)
+
 LOTES PERMITIDOS para cubricion:
 - Lote 1 y Lote 4: UNICOS lotes validos
 - Lote 6 vacias: Solo si la ultima ecografia fue vacia
 - Lote 2/3/5/6(gestantes)/13: PROHIBIDO ABSOLUTO
 
-UMBRALES DE DEL PROYECTADO (ya calculados en los datos):
+PRIMIPARAS (1 lactacion) — REGLAS ESPECIALES:
+- DEL proy. >150: APTA. TODAS las primiparas >150 DEL entran sin importar produccion.
+- DEL proy. 100-150 con prod <1.5L(p10d): ADELANTAR. Baja produccion, adelantar cubricion.
+- DEL proy. 100-150 con prod >=1.5L(p10d): NO_APTA. Aun produce bien, esperar.
+- DEL proy. <100: NO_APTA. Demasiado pronto.
+
+REGLAS GENERALES (lactacion >=2) — UMBRALES DE DEL PROYECTADO:
 - DEL proy. <130: NO_APTA. Da igual cuanto produzca. Demasiado pronto.
-- DEL proy. 130-150 con prod <1.5L: ADELANTAR. Mala productora que se va a secar.
-- DEL proy. 130-150 con prod >=1.5L: NO_APTA. Aun produce bien, esperar.
+- DEL proy. 130-150 con prod <1.5L(p10d): ADELANTAR. Mala productora que se va a secar.
+- DEL proy. 130-150 con prod >=1.5L(p10d): NO_APTA. Aun produce bien, esperar.
 - DEL proy. 150-220: APTA. Franja normal de cubricion.
-- DEL proy. 180-220 con buena prod: IDEAL. Zona perfecta para buenas productoras.
+- DEL proy. 180-220 con >=2.5L(p10d): IDEAL. Zona perfecta para buenas productoras.
 - DEL proy. >220: URGENTE. Deberia haberse cubierto ya.
 
 REGLA CLAVE PARA BUENAS PRODUCTORAS:
-Una cabra que da 4L con DEL proyectado de 95 NO SE TOCA. Es una maquina de leche.
+Una cabra que da 4L(p10d) con DEL proyectado de 95 NO SE TOCA. Es una maquina de leche.
 Las buenas productoras se estiran al maximo (hasta 210+ DEL). No se desperdician metiendolas antes.
 
 INSEMINACION ARTIFICIAL (30 mejores):
 - Solo de las APTAS (nunca de las NO_APTAS)
 - Sin doble vacia, sin abortos, conductividad <6.5
-- FACTOR PRINCIPAL: LitrosTotalesLactacion (rendimiento acumulado real, NO solo el pico de un dia)
-- Secundario: produccion diaria actual
+- FACTOR PRINCIPAL: LitrosTotalesLactacion (rendimiento acumulado real, NO pico de un dia)
+- Secundario: promedio 10 dias actual
 - Terciario: pocas lactaciones = mas joven = mejor inversion genetica
-- Un dia bueno no dice nada, el acumulado de toda la lactacion SI indica buena genetica
+- El acumulado de toda la lactacion indica buena genetica
 - 15 dias antes de entrar con machos
 
 PROHIBIDO PARA CUBRICION:

@@ -3258,50 +3258,72 @@ function ConsultasPage({ data, saveChat }) {
         if (lastEco && (lastEco.resultado === 'gestante' || lastEco.resultado === 'prenada')) return;
 
         // =============================================
-        // LÓGICA DE APTITUD — basada en DEL PROYECTADO
+        // LOGICA DE APTITUD — basada en DEL PROYECTADO
+        // Usa promedio 10 dias (prom10d) como referencia de produccion
+        // Fallback a litros diarios si no hay prom10d
         // =============================================
         let aptitud = "";
         let razon = "";
-        const esBuenaProductora = litros >= 2.5;
-        const esMediaProductora = litros >= 1.5 && litros < 2.5;
-        const esMalaProductora = litros < 1.5;
+        const prodRef = prom10d > 0 ? prom10d : litros;
+        const prodLabel = prom10d > 0 ? "prom10d" : "diario";
+        const esBuenaProductora = prodRef >= 2.5;
+        const esMediaProductora = prodRef >= 1.5 && prodRef < 2.5;
+        const esMalaProductora = prodRef < 1.5;
 
-        if (delProyectado < 130) {
-          // Demasiado pronto — esta cabra acaba de empezar lactación
-          aptitud = "NO_APTA";
-          razon = `DEL proyectado ${delProyectado} (<130). Demasiado pronto. Hoy=${delHoy}, produce ${litros.toFixed(1)}L. Debe seguir ordeñándose.`;
-        } else if (delProyectado >= 130 && delProyectado < 150) {
-          if (esMalaProductora) {
-            // Mala productora con poco tiempo — adelantar porque si no se seca
+        if (lact === 1) {
+          // =============================================
+          // PRIMIPARAS (1 lactacion) — REGLAS ESPECIALES
+          // >150 DEL: todas entran sin importar produccion
+          // 100-150 DEL + <1.5L: adelantar cubricion
+          // 100-150 DEL + >=1.5L: esperar, aun produce
+          // <100 DEL: demasiado pronto
+          // =============================================
+          if (delProyectado > 150) {
+            aptitud = "APTA";
+            razon = `PRIMIPARA L1, DEL proy.=${delProyectado} (>150), ${prodRef.toFixed(1)}L(${prodLabel}). Todas las primiparas >150 DEL entran.`;
+          } else if (delProyectado >= 100 && delProyectado <= 150 && esMalaProductora) {
             aptitud = "ADELANTAR";
-            razon = `DEL proy.=${delProyectado}, prod baja ${litros.toFixed(1)}L. Si la dejamos para la siguiente paridera será no rentable. Adelantar cubrición.`;
-          } else {
-            // Buena o media productora — esperar, está produciendo bien
+            razon = `PRIMIPARA L1, DEL proy.=${delProyectado}, prod baja ${prodRef.toFixed(1)}L(${prodLabel}) (<1.5). Adelantar cubricion.`;
+          } else if (delProyectado >= 100 && delProyectado <= 150) {
             aptitud = "NO_APTA";
-            razon = `DEL proy.=${delProyectado} (<150) pero produce ${litros.toFixed(1)}L. Aún es rentable, esperar a siguiente paridera.`;
-          }
-        } else if (delProyectado >= 150 && delProyectado <= 220) {
-          // FRANJA NORMAL de cubrición
-          if (esBuenaProductora && delProyectado < 180) {
-            // Buena productora pero aún tiene margen — podría estirarse
-            aptitud = "APTA";
-            razon = `DEL proy.=${delProyectado}, buena prod ${litros.toFixed(1)}L. En franja válida. Idealmente estirar a 200+ pero entra si hace falta.`;
-          } else if (esBuenaProductora && delProyectado >= 180) {
-            // Buena productora en zona ideal
-            aptitud = "IDEAL";
-            razon = `DEL proy.=${delProyectado}, ${litros.toFixed(1)}L. Zona ideal para buena productora.`;
-          } else if (esMediaProductora) {
-            aptitud = "APTA";
-            razon = `DEL proy.=${delProyectado}, prod media ${litros.toFixed(1)}L. Franja normal.`;
+            razon = `PRIMIPARA L1, DEL proy.=${delProyectado}, produce ${prodRef.toFixed(1)}L(${prodLabel}). Aun produce bien, esperar.`;
           } else {
-            // Mala productora en franja — debe entrar sí o sí
-            aptitud = "APTA";
-            razon = `DEL proy.=${delProyectado}, prod baja ${litros.toFixed(1)}L. Debe entrar a cubrición.`;
+            aptitud = "NO_APTA";
+            razon = `PRIMIPARA L1, DEL proy.=${delProyectado} (<100). Demasiado pronto para cubricion.`;
           }
-        } else if (delProyectado > 220) {
-          // Pasada de días — urgente
-          aptitud = "URGENTE";
-          razon = `DEL proy.=${delProyectado} (>220). URGENTE. Ya debería haberse cubierto. Riesgo de secarse sin preñar.`;
+        } else {
+          // =============================================
+          // REGLAS GENERALES (lactacion >= 2)
+          // =============================================
+          if (delProyectado < 130) {
+            aptitud = "NO_APTA";
+            razon = `DEL proy.=${delProyectado} (<130). Demasiado pronto. Hoy=${delHoy}, ${prodRef.toFixed(1)}L(${prodLabel}). Debe seguir en leche.`;
+          } else if (delProyectado >= 130 && delProyectado < 150) {
+            if (esMalaProductora) {
+              aptitud = "ADELANTAR";
+              razon = `DEL proy.=${delProyectado}, prod baja ${prodRef.toFixed(1)}L(${prodLabel}). No rentable, adelantar cubricion.`;
+            } else {
+              aptitud = "NO_APTA";
+              razon = `DEL proy.=${delProyectado} (<150) pero produce ${prodRef.toFixed(1)}L(${prodLabel}). Aun es rentable, esperar.`;
+            }
+          } else if (delProyectado >= 150 && delProyectado <= 220) {
+            if (esBuenaProductora && delProyectado < 180) {
+              aptitud = "APTA";
+              razon = `DEL proy.=${delProyectado}, buena prod ${prodRef.toFixed(1)}L(${prodLabel}). Franja valida. Idealmente estirar a 200+.`;
+            } else if (esBuenaProductora && delProyectado >= 180) {
+              aptitud = "IDEAL";
+              razon = `DEL proy.=${delProyectado}, ${prodRef.toFixed(1)}L(${prodLabel}). Zona ideal para buena productora.`;
+            } else if (esMediaProductora) {
+              aptitud = "APTA";
+              razon = `DEL proy.=${delProyectado}, prod media ${prodRef.toFixed(1)}L(${prodLabel}). Franja normal.`;
+            } else {
+              aptitud = "APTA";
+              razon = `DEL proy.=${delProyectado}, prod baja ${prodRef.toFixed(1)}L(${prodLabel}). Debe entrar a cubricion.`;
+            }
+          } else if (delProyectado > 220) {
+            aptitud = "URGENTE";
+            razon = `DEL proy.=${delProyectado} (>220). URGENTE. Ya deberia haberse cubierto. Riesgo de secarse sin prenar.`;
+          }
         }
 
         // Flags adicionales
@@ -3312,7 +3334,7 @@ function ConsultasPage({ data, saveChat }) {
         else if (cond > 6.0) flags.push(`⚠️ Cond alta ${cond.toFixed(2)}`);
         if (anots.length > 0) flags.push(`📋 ${anots.length} anotación(es) vet`);
 
-        allCandidates.push({ crotal: c.crotal, litros, litrosTotalesLact, promedioTotal, prom10d, delHoy, delProyectado, lact, cond, lote: c.lote?.nombre || '?', aptitud, razon, flags, vaciaCount, abortosC });
+        allCandidates.push({ crotal: c.crotal, litros, prodRef, litrosTotalesLact, promedioTotal, prom10d, delHoy, delProyectado, lact, cond, lote: c.lote?.nombre || '?', aptitud, razon, flags, vaciaCount, abortosC });
       });
 
       // Vacías del Lote 6
@@ -3347,23 +3369,26 @@ function ConsultasPage({ data, saveChat }) {
       const ideales = aptas.filter(c => c.aptitud === "IDEAL");
 
       if (urgentes.length > 0) {
-        ctx += `\n\n🚨 URGENTES — Cubrición inmediata (${urgentes.length}):`;
+        ctx += `\n\n🚨 URGENTES — Cubricion inmediata (${urgentes.length}):`;
         urgentes.sort((a, b) => b.delProyectado - a.delProyectado).forEach(c => {
-          ctx += `\n  ${c.crotal}: ${c.litros.toFixed(2)}L/día, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}→${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote}`;
-          ctx += `\n    → ${c.razon} ${c.flags.join(' ')}`;
+          const prd = c.prom10d > 0 ? c.prom10d.toFixed(2) + "L(p10d)" : c.litros.toFixed(2) + "L(diario)";
+          ctx += `\n  ${c.crotal}: ${prd}, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}->${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote}`;
+          ctx += `\n    -> ${c.razon} ${c.flags.join(' ')}`;
         });
       }
 
-      ctx += `\n\n✅ APTAS PARA CUBRICIÓN (${aptas.length} total):`;
-      ctx += `\n(Objetivo: meter al máximo número de cabras posible que cumplan requisitos)`;
-      aptas.sort((a, b) => b.litros - a.litros).forEach(c => {
-        ctx += `\n  ${c.crotal}: ${c.litros.toFixed(2)}L/día, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}→${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote} [${c.aptitud}]`;
-        ctx += `\n    → ${c.razon} ${c.flags.length > 0 ? c.flags.join(' ') : ''}`;
+      ctx += `\n\n✅ APTAS PARA CUBRICION (${aptas.length} total):`;
+      ctx += `\n(Produccion = promedio 10 dias. Objetivo: meter al maximo cabras que cumplan requisitos)`;
+      aptas.sort((a, b) => (b.prom10d || b.litros) - (a.prom10d || a.litros)).forEach(c => {
+        const prd = c.prom10d > 0 ? c.prom10d.toFixed(2) + "L(p10d)" : c.litros.toFixed(2) + "L(diario)";
+        ctx += `\n  ${c.crotal}: ${prd}, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}->${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote} [${c.aptitud}]`;
+        ctx += `\n    -> ${c.razon} ${c.flags.length > 0 ? c.flags.join(' ') : ''}`;
       });
 
       ctx += `\n\n⛔ NO APTAS (${noAptas.length}) — PROHIBIDO recomendar:`;
       noAptas.forEach(c => {
-        ctx += `\n  ${c.crotal}: ${c.litros.toFixed(2)}L/día, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}→${c.delProyectado}, ${c.lote} — ${c.razon}`;
+        const prd = c.prom10d > 0 ? c.prom10d.toFixed(2) + "L(p10d)" : c.litros.toFixed(2) + "L(diario)";
+        ctx += `\n  ${c.crotal}: ${prd}, LitTotLact=${c.litrosTotalesLact.toFixed(0)}, DEL ${c.delHoy}->${c.delProyectado}, ${c.lote} — ${c.razon}`;
       });
 
       // =============================================
@@ -3389,13 +3414,16 @@ function ConsultasPage({ data, saveChat }) {
       
       ctx += `\nCandidatas limpias para IA: ${insemCandidates.length}`;
       insemCandidates.slice(0, 35).forEach((c, i) => {
-        ctx += `\n  ${i + 1}. ${c.crotal}: LitTotLact=${c.litrosTotalesLact.toFixed(0)}, ${c.litros.toFixed(2)}L/día, DEL ${c.delHoy}→${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote}`;
+        const prd = c.prom10d > 0 ? c.prom10d.toFixed(2) + "L(p10d)" : c.litros.toFixed(2) + "L(diario)";
+        ctx += `\n  ${i + 1}. ${c.crotal}: LitTotLact=${c.litrosTotalesLact.toFixed(0)}, ${prd}, DEL ${c.delHoy}->${c.delProyectado}, L${c.lact}, Cond=${c.cond.toFixed(2)}, ${c.lote}`;
       });
 
       ctx += `\n\n⛔⛔⛔ REGLA ABSOLUTA: SOLO recomendar cabras de la lista de APTAS.`;
-      ctx += `\nLas NO APTAS tienen DEL proyectado demasiado bajo o producen demasiado bien para cortarles la lactación.`;
-      ctx += `\nSi una cabra da 4L y tiene DEL proyectado <130 → NO SE TOCA. Está en plena producción.`;
-      ctx += `\nPara inseminación, LitrosTotalesLactación manda. Un día bueno no dice nada, el acumulado sí. ⛔⛔⛔`;
+      ctx += `\nLas NO APTAS tienen DEL proyectado demasiado bajo o producen demasiado bien para cortarles la lactacion.`;
+      ctx += `\nSi una cabra da 4L(prom10d) y tiene DEL proyectado <130 -> NO SE TOCA. Esta en plena produccion.`;
+      ctx += `\nPRODUCCION = promedio 10 dias (p10d). Es mas fiable que la produccion de un solo dia.`;
+      ctx += `\nPRIMIPARAS (L1): >150 DEL entran TODAS. 100-150 DEL con <1.5L(p10d) se adelantan.`;
+      ctx += `\nPara inseminacion, LitrosTotalesLactacion manda. El acumulado indica buena genetica. ⛔⛔⛔`;
     }
     
     // Include lote details when relevant

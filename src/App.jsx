@@ -752,7 +752,11 @@ function downloadExcel(messageText, queryTitle) {
       html += '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;">';
       html += "<tr>" + t.headers.map(h => `<th style="background:#E8950A;color:#FFF;font-weight:bold;">${h}</th>`).join("") + "</tr>";
       t.rows.forEach(row => {
-        html += "<tr>" + row.map(c => `<td>${c}</td>`).join("") + "</tr>";
+        html += "<tr>" + row.map(c => {
+          const isLeadingZero = /^0\d+$/.test(c.trim());
+          const style = isLeadingZero ? ' style="mso-number-format:\'\\@\'"' : '';
+          return `<td${style}>${c}</td>`;
+        }).join("") + "</tr>";
       });
       html += "</table>";
     });

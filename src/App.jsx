@@ -939,12 +939,13 @@ function KPI({ icon, label, value, sub, accent, onClick }) {
     </div>
   );
 }
-function DataModal({ title, icon, accent, data, columns, onClose, searchPH, folders, onRowClick }) {
+function DataModal({ title, icon, accent, data, columns, onClose, searchPH, folders, onRowClick, subfolders }) {
   const [s, setS] = useState("");
   const [activeFolder, setActiveFolder] = useState(folders ? null : "__all__");
-  
-  const currentData = activeFolder === "__all__" ? data : 
-    folders ? data.filter(r => r.__folder === activeFolder) : data;
+  const [activeSubfolder, setActiveSubfolder] = useState(null);
+
+  const currentData = activeFolder === "__all__" ? data :
+    folders ? data.filter(r => r.__folder === activeFolder && (!subfolders || !activeSubfolder || r.__subfolder === activeSubfolder)) : data;
   const f = currentData.filter(r => Object.values(r).some(v => String(v || "").toLowerCase().includes(s.toLowerCase())));
 
   return (
@@ -958,16 +959,16 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 16, fontWeight: 700, color: "#1E293B" }}>{title}</span>
                 {activeFolder && activeFolder !== "__all__" && (
-                  <span style={{ fontSize: 13, color: "#94A3B8" }}>› {activeFolder}</span>
+                  <span style={{ fontSize: 13, color: "#94A3B8" }}>{"\u203A"} {activeFolder}{activeSubfolder ? ` \u203A ${activeSubfolder}` : ""}</span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "#94A3B8" }}>{activeFolder ? `${f.length} registros${onRowClick ? " · Haz clic en una fila para ver historial" : ""}` : `${folders.length} carpetas`}</div>
+              <div style={{ fontSize: 12, color: "#94A3B8" }}>{activeFolder && (activeSubfolder || !subfolders) ? `${f.length} registros${onRowClick ? " \u00B7 Haz clic en una fila para ver historial" : ""}` : activeFolder && subfolders && !activeSubfolder ? `${subfolders.filter(sf => sf.parent === activeFolder).length} subcarpetas` : `${folders.length} carpetas`}</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {activeFolder && folders && (
-              <button onClick={() => { setActiveFolder(null); setS(""); }} style={{ padding: "7px 14px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 12, color: "#64748B", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
-                ← Volver
+              <button onClick={() => { if (activeSubfolder) { setActiveSubfolder(null); setS(""); } else { setActiveFolder(null); setS(""); } }} style={{ padding: "7px 14px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 12, color: "#64748B", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+                {"\u2190"} Volver
               </button>
             )}
             <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 17, color: "#94A3B8", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
@@ -1001,8 +1002,38 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
           </div>
         )}
 
+        {/* Subfolder view */}
+        {activeFolder && subfolders && !activeSubfolder && (() => {
+          const subs = subfolders.filter(sf => sf.parent === activeFolder);
+          return subs.length > 0 ? (
+            <div style={{ flex: 1, overflow: "auto", padding: "20px 26px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+                {subs.map((sf, i) => (
+                  <div key={i} onClick={() => setActiveSubfolder(sf.name)}
+                    style={{
+                      background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 14,
+                      padding: "20px", cursor: "pointer", transition: "all .2s",
+                      display: "flex", alignItems: "center", gap: 14,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}50`; e.currentTarget.style.background = `${accent}06`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 16px ${accent}12`; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.background = "#FAFAFA"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
+                  >
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+                      {sf.icon || "\uD83D\uDCC2"}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>{sf.name}</div>
+                      <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{sf.count} registros</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null;
+        })()}
+
         {/* Data view */}
-        {activeFolder && <>
+        {activeFolder && (!subfolders || activeSubfolder) && <>
           <div style={{ padding: "14px 26px", borderBottom: "1px solid #F1F5F9" }}>
             <div style={{ position: "relative" }}>
               <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 15 }}>🔍</span>
@@ -1892,9 +1923,34 @@ function DashboardPage({ data }) {
       })()}
 
       {modal === "eco" && (() => {
-        const d = ecosModal.map(e => ({ ...e, __folder: e.paridera || "Sin paridera" }));
+        // Group ecografias by paridera, then infer ronda from dates (1st date = 1a eco, 2nd = 2a eco)
+        const ecosByParidera = {};
+        ecosModal.forEach(e => {
+          const p = e.paridera || "Sin paridera";
+          if (!ecosByParidera[p]) ecosByParidera[p] = [];
+          ecosByParidera[p].push(e);
+        });
+        const d = ecosModal.map(e => {
+          const p = e.paridera || "Sin paridera";
+          const fechas = [...new Set(ecosByParidera[p].map(x => x.fecha))].sort();
+          const ronda = fechas.indexOf(e.fecha) === 0 ? "1a Ecograf\u00EDa" : "2a Ecograf\u00EDa (repaso)";
+          return { ...e, __folder: p, __subfolder: ronda, ronda };
+        });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Ecografías" icon="🔬" accent="#7C3AED" data={d} columns={ecoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} />;
+        const subs = [];
+        folders.forEach(f => {
+          const rondas = [...new Set(d.filter(r => r.__folder === f.name).map(r => r.__subfolder))];
+          rondas.forEach(r => {
+            subs.push({ parent: f.name, name: r, count: d.filter(x => x.__folder === f.name && x.__subfolder === r).length, icon: r.includes("1a") ? "\uD83D\uDD2C" : "\uD83D\uDD04" });
+          });
+        });
+        const ecColsWithRonda = [
+          { key: "crotal", label: "Crotal", mono: true, bold: true },
+          { key: "fecha", label: "Fecha", mono: true },
+          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : v === "hidrometra" ? "#E8950A" : "#059669"} /> },
+          { key: "paridera", label: "Paridera" },
+        ];
+        return <DataModal title="Ecograf\u00EDas" icon="\uD83D\uDD2C" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={subs} />;
       })()}
 
       {modal === "trat" && (() => {

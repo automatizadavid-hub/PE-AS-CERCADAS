@@ -2766,17 +2766,19 @@ function ImportadorPage({ data, refresh, saveChat }) {
     const { data: ecosRefresh } = await supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)").eq("paridera_id", parideraId);
     const ecosExistentes = ecosRefresh || [];
 
-    let gestantes = 0, vacias = 0, hidrometras = 0, dobleVacias = 0, errors = 0, skipped = 0;
+    let gestantes = 0, vacias = 0, hidrometras = 0, dobleVacias = 0, errors = 0, skipped = 0, totalParsed = 0;
     const errorList = [];
     const dobleVaciaList = [];
     const hidrometraList = [];
     const vaciaList = [];
+    const gestanteList = [];
 
     for (const row of dataRows) {
       try {
         // Parse: [0]=id_electronico, [3]=resultado, [4]=fecha
         const idElecRaw = (row[0] || "").trim();
-        if (!idElecRaw || idElecRaw.length < 10) continue;
+        if (!idElecRaw || idElecRaw.length < 5) continue;
+        totalParsed++;
 
         const resultadoRaw = (row[3] || "").trim().toUpperCase();
         const fechaRaw = (row[4] || "").trim();
@@ -2799,11 +2801,13 @@ function ImportadorPage({ data, refresh, saveChat }) {
         }
         if (!fecha) fecha = new Date().toISOString().split("T")[0];
 
-        // Find cabra by last 6 digits of id_electronico (the reader gives the full number but only the last 6 identify the animal)
+        // Find cabra: try id_electronico first (last 6 digits), then crotal (last 6 digits), then crotal directly
         const last6 = idElecRaw.slice(-6);
-        const cabra = data.cabras.find(c => c.id_electronico && c.id_electronico.trim().slice(-6) === last6);
+        let cabra = data.cabras.find(c => c.id_electronico && c.id_electronico.trim().slice(-6) === last6);
+        if (!cabra) cabra = data.cabras.find(c => c.crotal && c.crotal.trim() === last6);
+        if (!cabra) cabra = data.cabras.find(c => c.crotal && c.crotal.trim().slice(-6) === last6);
         if (!cabra) {
-          errorList.push(`ID ...${last6}: no encontrada en el sistema`);
+          errorList.push("ID ..." + last6 + ": no encontrada en el sistema");
           errors++;
           continue;
         }
@@ -2863,27 +2867,29 @@ function ImportadorPage({ data, refresh, saveChat }) {
     }
 
     const total = gestantes + vacias + hidrometras;
-    setImportResult({ imported: total, errors, errorList, total: dataRows.length, tipo: "ecografia",
+    setImportResult({ imported: total, errors, errorList, total: totalParsed, tipo: "ecografia",
       detalle: { gestantes, vacias, hidrometras, dobleVacias, skipped } });
     setImporting(false);
     refresh();
 
     // Build detailed chat summary
-    let chatMsg = "** Ecografias importadas** (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + " - " + parideraNombre + ")\n\n";
-    chatMsg += "🟢 **" + gestantes + "** gestantes (todo correcto)\n";
-    chatMsg += "🔴 **" + vacias + "** vacias";
-    if (vaciaList.length > 0) chatMsg += ": " + vaciaList.join(", ");
-    chatMsg += "\n";
+    let chatMsg = "**Ecografias importadas** (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + " - " + parideraNombre + ")\n";
+    chatMsg += "Filas procesadas: " + totalParsed + " | Importadas: " + total + " | Errores: " + errors + "\n\n";
+    if (gestantes > 0) chatMsg += "🟢 **" + gestantes + "** gestantes\n";
+    if (vacias > 0) {
+      chatMsg += "🔴 **" + vacias + "** vacias: " + vaciaList.join(", ") + "\n";
+    }
     if (hidrometras > 0) {
       chatMsg += "⚠️ **" + hidrometras + "** hidrometras: " + hidrometraList.join(", ") + "\n";
-      chatMsg += "   _Hidrometra = pseudogestacion (liquido en utero sin feto). Requiere tratamiento con prostaglandinas._\n";
+      chatMsg += "   _Hidrometra = pseudogestacion. Requiere tratamiento con prostaglandinas._\n";
     }
     if (dobleVacias > 0) {
       chatMsg += "\n🚨 **" + dobleVacias + " DOBLE VACIAS**: " + dobleVaciaList.join(", ") + "\n";
       chatMsg += "   _Candidatas a descarte o revision veterinaria urgente._\n";
     }
     if (skipped > 0) chatMsg += "\n⏭️ " + skipped + " ya existian (no duplicadas)";
-    if (errors > 0) chatMsg += "\n🔴 " + errors + " errores:\n" + errorList.slice(0, 8).map(function(e) { return "  - " + e; }).join("\n");
+    if (errors > 0) chatMsg += "\n🔴 " + errors + " errores:\n" + errorList.slice(0, 15).map(function(e) { return "  - " + e; }).join("\n");
+    if (total === 0 && errors > 0) chatMsg += "\n\n⚠️ No se importo ninguna ecografia. Revisa que los id_electronico del CSV coincidan con los de las cabras en el sistema.";
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 

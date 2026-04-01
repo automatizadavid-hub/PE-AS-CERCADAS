@@ -853,7 +853,7 @@ function useSupabaseData() {
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre), riia, id_electronico"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
-        supabase.from("ecografia").select("*, ronda, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
+        supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
         supabase.from("tratamiento").select("*, cabra:cabra_id(crotal)"),
         supabase.from("cubricion").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre), macho:macho_id(crotal)"),
         supabase.from("cria").select("*, madre:madre_id(crotal)"),
@@ -1002,10 +1002,11 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
           </div>
         )}
 
-        {/* Subfolder view */}
+        {/* Subfolder view — skip if only 1 subfolder (auto-select it) */}
         {activeFolder && subfolders && !activeSubfolder && (() => {
           const subs = subfolders.filter(sf => sf.parent === activeFolder);
-          return subs.length > 0 ? (
+          if (subs.length === 1) { setTimeout(() => setActiveSubfolder(subs[0].name), 0); return null; }
+          return subs.length > 1 ? (
             <div style={{ flex: 1, overflow: "auto", padding: "20px 26px" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
                 {subs.map((sf, i) => (
@@ -1924,14 +1925,14 @@ function DashboardPage({ data }) {
       })()}
 
       {modal === "eco" && (() => {
-        // Group ecografias by paridera + ronda (stored in DB, not inferred)
+        // Group ecografias by paridera + ronda (stored in DB field "ronda")
         const d = ecosModal.map(e => {
           const p = e.paridera || "Sin paridera";
-          const rondaLabel = e.ronda === "segunda" ? "2a Ecografia (repaso)" : e.ronda === "primera" ? "1a Ecografia" : "Ecografias";
+          const rondaLabel = e.ronda === "segunda" ? "2a Ecografia (repaso)" : e.ronda === "primera" ? "1a Ecografia" : "Sin clasificar";
           return { ...e, __folder: p, __subfolder: rondaLabel };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        // Build subfolders: for each paridera, show 1a and/or 2a ronda
+        // Build subfolders: for each paridera, show available rondas
         const subs = [];
         folders.forEach(f => {
           const rondas = [...new Set(d.filter(r => r.__folder === f.name).map(r => r.__subfolder))].sort();
@@ -1945,9 +1946,7 @@ function DashboardPage({ data }) {
           { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : v === "hidrometra" ? "#E8950A" : "#059669"} /> },
           { key: "paridera", label: "Paridera" },
         ];
-        // Only use subfolders if there are multiple rondas in at least one paridera, or if ronda data exists
-        const hasRondaData = d.some(e => e.ronda);
-        return <DataModal title="Ecografias" icon="🔬" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={hasRondaData ? subs : undefined} />;
+        return <DataModal title="Ecografias" icon="🔬" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={subs} />;
       })()}
 
       {modal === "trat" && (() => {

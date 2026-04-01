@@ -853,7 +853,7 @@ function useSupabaseData() {
         supabase.from("cabra").select("id, crotal, estado, raza, fecha_nacimiento, num_lactaciones, dias_en_leche, edad_meses, estado_ginecologico, lote_id, notas, lote:lote_id(nombre), riia, id_electronico"),
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
-        supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
+        supabase.from("ecografia").select("*, ronda, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
         supabase.from("tratamiento").select("*, cabra:cabra_id(crotal)"),
         supabase.from("cubricion").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre), macho:macho_id(crotal)"),
         supabase.from("cria").select("*, madre:madre_id(crotal)"),
@@ -1511,6 +1511,7 @@ function DashboardPage({ data }) {
     fecha: e.fecha ? new Date(e.fecha).toLocaleDateString("es-ES") : "-",
     resultado: e.resultado || "-",
     paridera: e.paridera?.nombre || "-",
+    ronda: e.ronda || null,
   }));
   const tratsModal = data.tratamientos.map(t => ({
     crotal: t.cabra?.crotal || "-",
@@ -1923,25 +1924,19 @@ function DashboardPage({ data }) {
       })()}
 
       {modal === "eco" && (() => {
-        // Group ecografias by paridera, then infer ronda from dates (1st date = 1a eco, 2nd = 2a eco)
-        const ecosByParidera = {};
-        ecosModal.forEach(e => {
-          const p = e.paridera || "Sin paridera";
-          if (!ecosByParidera[p]) ecosByParidera[p] = [];
-          ecosByParidera[p].push(e);
-        });
+        // Group ecografias by paridera + ronda (stored in DB, not inferred)
         const d = ecosModal.map(e => {
           const p = e.paridera || "Sin paridera";
-          const fechas = [...new Set(ecosByParidera[p].map(x => x.fecha))].sort();
-          const ronda = fechas.indexOf(e.fecha) === 0 ? "1a Ecograf\u00EDa" : "2a Ecograf\u00EDa (repaso)";
-          return { ...e, __folder: p, __subfolder: ronda, ronda };
+          const rondaLabel = e.ronda === "segunda" ? "2a Ecograf\u00EDa (repaso)" : e.ronda === "primera" ? "1a Ecograf\u00EDa" : "Ecograf\u00EDas";
+          return { ...e, __folder: p, __subfolder: rondaLabel };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        // Build subfolders: for each paridera, show 1a and/or 2a ronda
         const subs = [];
         folders.forEach(f => {
-          const rondas = [...new Set(d.filter(r => r.__folder === f.name).map(r => r.__subfolder))];
+          const rondas = [...new Set(d.filter(r => r.__folder === f.name).map(r => r.__subfolder))].sort();
           rondas.forEach(r => {
-            subs.push({ parent: f.name, name: r, count: d.filter(x => x.__folder === f.name && x.__subfolder === r).length, icon: r.includes("1a") ? "\uD83D\uDD2C" : "\uD83D\uDD04" });
+            subs.push({ parent: f.name, name: r, count: d.filter(x => x.__folder === f.name && x.__subfolder === r).length, icon: r.includes("1a") ? "\uD83D\uDD2C" : r.includes("2a") ? "\uD83D\uDD04" : "\uD83D\uDCC1" });
           });
         });
         const ecColsWithRonda = [
@@ -1950,7 +1945,9 @@ function DashboardPage({ data }) {
           { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : v === "hidrometra" ? "#E8950A" : "#059669"} /> },
           { key: "paridera", label: "Paridera" },
         ];
-        return <DataModal title="Ecograf\u00EDas" icon="\uD83D\uDD2C" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={subs} />;
+        // Only use subfolders if there are multiple rondas in at least one paridera, or if ronda data exists
+        const hasRondaData = d.some(e => e.ronda);
+        return <DataModal title="Ecograf\u00EDas" icon="\uD83D\uDD2C" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={hasRondaData ? subs : undefined} />;
       })()}
 
       {modal === "trat" && (() => {
@@ -2756,8 +2753,19 @@ function ImportadorPage({ data, refresh, saveChat }) {
     const hasHeader = firstRowText.includes("crotal") || firstRowText.includes("resultado") || firstRowText.includes("electronico") || firstRowText.includes("identificador");
     const dataRows = hasHeader ? rows.slice(1) : rows;
 
-    // Get existing ecografias for this paridera to check duplicates and detect doble vacias
-    const ecosExistentes = data.ecografias.filter(e => e.paridera_id === parideraId);
+    // Delete existing ecografias for this paridera+ronda to allow clean re-imports
+    const ecosPreviasMismaRonda = data.ecografias.filter(e => e.paridera_id === parideraId && (e.ronda === ronda || (!e.ronda && ronda)));
+    if (ecosPreviasMismaRonda.length > 0) {
+      const idsToDelete = ecosPreviasMismaRonda.map(e => e.id);
+      for (const id of idsToDelete) {
+        await supabase.from("ecografia").delete().eq("id", id);
+      }
+      setMs(p => [...p, { role: "assistant", text: `\uD83D\uDDD1\uFE0F Eliminadas ${idsToDelete.length} ecografias anteriores de ${parideraNombre} (${ronda === "primera" ? "1a ronda" : "2a ronda"}) para reimportar limpio.` }]);
+    }
+
+    // Get existing ecografias for this paridera (after cleanup) to detect doble vacias
+    const { data: ecosRefresh } = await supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)").eq("paridera_id", parideraId);
+    const ecosExistentes = ecosRefresh || [];
 
     let gestantes = 0, vacias = 0, hidrometras = 0, dobleVacias = 0, errors = 0, skipped = 0;
     const errorList = [];
@@ -2805,12 +2813,13 @@ function ImportadorPage({ data, refresh, saveChat }) {
         const existeDuplicada = ecosExistentes.find(e => e.cabra_id === cabra.id && e.resultado === resultado);
         if (existeDuplicada) { skipped++; continue; }
 
-        // Insert ecografia
+        // Insert ecografia (with ronda field)
         const { error: errEco } = await supabase.from("ecografia").insert([{
           cabra_id: cabra.id,
           paridera_id: parideraId,
           fecha,
           resultado,
+          ronda,
         }]);
         if (errEco) { errors++; errorList.push(`${cabra.crotal}: ${errEco.message}`); continue; }
 

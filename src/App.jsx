@@ -1019,7 +1019,7 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
                     onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.background = "#FAFAFA"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
                   >
                     <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
-                      {sf.icon || "\uD83D\uDCC2"}
+                      {sf.icon || "📂"}
                     </div>
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>{sf.name}</div>
@@ -1927,7 +1927,7 @@ function DashboardPage({ data }) {
         // Group ecografias by paridera + ronda (stored in DB, not inferred)
         const d = ecosModal.map(e => {
           const p = e.paridera || "Sin paridera";
-          const rondaLabel = e.ronda === "segunda" ? "2a Ecograf\u00EDa (repaso)" : e.ronda === "primera" ? "1a Ecograf\u00EDa" : "Ecograf\u00EDas";
+          const rondaLabel = e.ronda === "segunda" ? "2a Ecografia (repaso)" : e.ronda === "primera" ? "1a Ecografia" : "Ecografias";
           return { ...e, __folder: p, __subfolder: rondaLabel };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
@@ -1936,7 +1936,7 @@ function DashboardPage({ data }) {
         folders.forEach(f => {
           const rondas = [...new Set(d.filter(r => r.__folder === f.name).map(r => r.__subfolder))].sort();
           rondas.forEach(r => {
-            subs.push({ parent: f.name, name: r, count: d.filter(x => x.__folder === f.name && x.__subfolder === r).length, icon: r.includes("1a") ? "\uD83D\uDD2C" : r.includes("2a") ? "\uD83D\uDD04" : "\uD83D\uDCC1" });
+            subs.push({ parent: f.name, name: r, count: d.filter(x => x.__folder === f.name && x.__subfolder === r).length, icon: r.includes("1a") ? "🔬" : r.includes("2a") ? "🔄" : "📁" });
           });
         });
         const ecColsWithRonda = [
@@ -1947,7 +1947,7 @@ function DashboardPage({ data }) {
         ];
         // Only use subfolders if there are multiple rondas in at least one paridera, or if ronda data exists
         const hasRondaData = d.some(e => e.ronda);
-        return <DataModal title="Ecograf\u00EDas" icon="\uD83D\uDD2C" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={hasRondaData ? subs : undefined} />;
+        return <DataModal title="Ecografias" icon="🔬" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={hasRondaData ? subs : undefined} />;
       })()}
 
       {modal === "trat" && (() => {
@@ -2746,7 +2746,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     const loteEco = ecoOptions.lote;
     const parideraNombre = data.parideras.find(p => p.id === parideraId)?.nombre || "?";
 
-    setMs(p => [...p, { role: "assistant", text: `\uD83D\uDD2C Importando ecografias (${ronda === "primera" ? "1a ronda" : "2a ronda - repaso"}) de ${parideraNombre}${loteEco ? ` (${loteEco})` : ""}...\n${rows.length} filas detectadas` }]);
+    setMs(p => [...p, { role: "assistant", text: "🔬 Importando ecografias (" + (ronda === "primera" ? "1a ronda" : "2a ronda - repaso") + ") de " + parideraNombre + (loteEco ? " (" + loteEco + ")" : "") + "...\n" + rows.length + " filas detectadas" }]);
 
     // Detect if first row is a header (contains text like "crotal", "resultado", etc.)
     const firstRowText = normalizeText((rows[0] || []).join(" "));
@@ -2760,7 +2760,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
       for (const id of idsToDelete) {
         await supabase.from("ecografia").delete().eq("id", id);
       }
-      setMs(p => [...p, { role: "assistant", text: `\uD83D\uDDD1\uFE0F Eliminadas ${idsToDelete.length} ecografias anteriores de ${parideraNombre} (${ronda === "primera" ? "1a ronda" : "2a ronda"}) para reimportar limpio.` }]);
+      setMs(p => [...p, { role: "assistant", text: "🗑️ Eliminadas " + idsToDelete.length + " ecografias anteriores de " + parideraNombre + " (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + ") para reimportar limpio." }]);
     }
 
     // Get existing ecografias for this paridera (after cleanup) to detect doble vacias
@@ -2870,21 +2870,21 @@ function ImportadorPage({ data, refresh, saveChat }) {
     refresh();
 
     // Build detailed chat summary
-    let chatMsg = `\u2705 **Ecografias importadas** (${ronda === "primera" ? "1a ronda" : "2a ronda"} - ${parideraNombre})\n\n`;
-    chatMsg += `\uD83D\uDFE2 **${gestantes}** gestantes (todo correcto)\n`;
-    chatMsg += `\uD83D\uDD34 **${vacias}** vacias`;
-    if (vaciaList.length > 0) chatMsg += `: ${vaciaList.join(", ")}`;
-    chatMsg += `\n`;
+    let chatMsg = "** Ecografias importadas** (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + " - " + parideraNombre + ")\n\n";
+    chatMsg += "🟢 **" + gestantes + "** gestantes (todo correcto)\n";
+    chatMsg += "🔴 **" + vacias + "** vacias";
+    if (vaciaList.length > 0) chatMsg += ": " + vaciaList.join(", ");
+    chatMsg += "\n";
     if (hidrometras > 0) {
-      chatMsg += `\u26A0\uFE0F **${hidrometras}** hidrometras: ${hidrometraList.join(", ")}\n`;
-      chatMsg += `   _Hidrometra = pseudogestacion (liquido en utero sin feto). Requiere tratamiento con prostaglandinas._\n`;
+      chatMsg += "⚠️ **" + hidrometras + "** hidrometras: " + hidrometraList.join(", ") + "\n";
+      chatMsg += "   _Hidrometra = pseudogestacion (liquido en utero sin feto). Requiere tratamiento con prostaglandinas._\n";
     }
     if (dobleVacias > 0) {
-      chatMsg += `\n\uD83D\uDEA8 **${dobleVacias} DOBLE VACIAS**: ${dobleVaciaList.join(", ")}\n`;
-      chatMsg += `   _Candidatas a descarte o revision veterinaria urgente._\n`;
+      chatMsg += "\n🚨 **" + dobleVacias + " DOBLE VACIAS**: " + dobleVaciaList.join(", ") + "\n";
+      chatMsg += "   _Candidatas a descarte o revision veterinaria urgente._\n";
     }
-    if (skipped > 0) chatMsg += `\n\u23ED\uFE0F ${skipped} ya existian (no duplicadas)`;
-    if (errors > 0) chatMsg += `\n\uD83D\uDD34 ${errors} errores:\n${errorList.slice(0, 8).map(e => `  - ${e}`).join("\n")}`;
+    if (skipped > 0) chatMsg += "\n⏭️ " + skipped + " ya existian (no duplicadas)";
+    if (errors > 0) chatMsg += "\n🔴 " + errors + " errores:\n" + errorList.slice(0, 8).map(function(e) { return "  - " + e; }).join("\n");
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 
@@ -2901,7 +2901,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
       setFileData({ "Datos": cleanRows.slice(0, 60) });
       
       setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${cleanRows.length} filas, ${cleanRows[0]?.length || 0} columnas)` }]);
-      setMs(p => [...p, { role: "assistant", text: `Archivo cargado. Selecciona el tipo de datos:\n\u2022 \uD83E\uDD5B **Producci\u00F3n** \u2014 informe diario FLM\n\u2022 \uD83C\uDF7C **Paridera** \u2014 partos, abortos, vac\u00EDas y cr\u00EDas\n\u2022 \uD83D\uDC89 **Tratamientos** \u2014 vacunas, desparasitaciones, fertilidad\n\u2022 \uD83D\uDD2C **Inseminaci\u00F3n** \u2014 registro de inseminaciones\n\u2022 \uD83D\uDCCB **Anotaciones** \u2014 observaciones veterinarias\n\u2022 \uD83D\uDD2C **Ecograf\u00EDas** \u2014 gestantes, vac\u00EDas, hidrometras\n\nUsa los botones de abajo para elegir.` }]);
+      setMs(p => [...p, { role: "assistant", text: "Archivo cargado. Selecciona el tipo de datos:\n• 🥛 **Produccion** — informe diario FLM\n• 🍼 **Paridera** — partos, abortos, vacias y crias\n• 💉 **Tratamientos** — vacunas, desparasitaciones, fertilidad\n• 🔬 **Inseminacion** — registro de inseminaciones\n• 📋 **Anotaciones** — observaciones veterinarias\n• 🔬 **Ecografias** — gestantes, vacias, hidrometras\n\nUsa los botones de abajo para elegir." }]);
     } catch (err) {
       setMs(p => [...p, { role: "assistant", text: `Error leyendo archivo: ${err.message}` }]);
     }
@@ -3168,7 +3168,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
               background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
             }}>
-            {importing ? "\u23F3 Importando..." : csvType === "produccion" ? `\uD83D\uDE80 Importar ${rawRows.length - 1} cabras a Supabase` : csvType === "ecografia" ? `\uD83D\uDD2C Importar ${rawRows.length} ecografias a Supabase` : `\uD83D\uDCCB Importar ${rawRows.length - 1} registros a Supabase`}
+            {importing ? "Importando..." : csvType === "produccion" ? ("🚀 Importar " + (rawRows.length - 1) + " cabras a Supabase") : csvType === "ecografia" ? ("🔬 Importar " + rawRows.length + " ecografias a Supabase") : ("📋 Importar " + (rawRows.length - 1) + " registros a Supabase")}
           </button>
         )}
 

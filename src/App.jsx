@@ -2095,8 +2095,9 @@ function ImportadorPage({ data, refresh, saveChat }) {
   const [rawRows, setRawRows] = useState(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
-  const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | "paridera" | "tratamiento" | "inseminacion" | null
+  const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | "paridera" | "tratamiento" | "inseminacion" | "ecografia" | null
   const [pendingAction, setPendingAction] = useState(null); // { type, description, execute }
+  const [ecoOptions, setEcoOptions] = useState({ paridera_id: null, lote: null, ronda: null });
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
@@ -2681,10 +2682,152 @@ function ImportadorPage({ data, refresh, saveChat }) {
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 
+  // Import Ecografia CSV — Format: ID_ELECTRONICO;;;RESULTADO;DD/MM/YYYY;NUM (sin cabecera)
+  // Resultado vacio = gestante, "VACIA" = vacia, "HIDROMETRA" = hidrometra
+  const importEcografia = async (rows) => {
+    setImporting(true);
+    setImportResult(null);
+
+    const parideraId = ecoOptions.paridera_id;
+    const ronda = ecoOptions.ronda;
+    const loteEco = ecoOptions.lote;
+    const parideraNombre = data.parideras.find(p => p.id === parideraId)?.nombre || "?";
+
+    setMs(p => [...p, { role: "assistant", text: `\uD83D\uDD2C Importando ecografias (${ronda === "primera" ? "1a ronda" : "2a ronda - repaso"}) de ${parideraNombre}${loteEco ? ` (${loteEco})` : ""}...\n${rows.length} filas detectadas` }]);
+
+    // Detect if first row is a header (contains text like "crotal", "resultado", etc.)
+    const firstRowText = normalizeText((rows[0] || []).join(" "));
+    const hasHeader = firstRowText.includes("crotal") || firstRowText.includes("resultado") || firstRowText.includes("electronico") || firstRowText.includes("identificador");
+    const dataRows = hasHeader ? rows.slice(1) : rows;
+
+    // Get existing ecografias for this paridera to check duplicates and detect doble vacias
+    const ecosExistentes = data.ecografias.filter(e => e.paridera_id === parideraId);
+
+    let gestantes = 0, vacias = 0, hidrometras = 0, dobleVacias = 0, errors = 0, skipped = 0;
+    const errorList = [];
+    const dobleVaciaList = [];
+    const hidrometraList = [];
+    const vaciaList = [];
+
+    for (const row of dataRows) {
+      try {
+        // Parse: [0]=id_electronico, [3]=resultado, [4]=fecha
+        const idElecRaw = (row[0] || "").trim();
+        if (!idElecRaw || idElecRaw.length < 10) continue;
+
+        const resultadoRaw = (row[3] || "").trim().toUpperCase();
+        const fechaRaw = (row[4] || "").trim();
+
+        // Determine resultado
+        let resultado = "gestante";
+        if (resultadoRaw === "VACIA" || resultadoRaw === "VAC\u00CDA") resultado = "vacia";
+        else if (resultadoRaw.includes("HIDROMETRA") || resultadoRaw.includes("HIDRO")) resultado = "hidrometra";
+        else if (resultadoRaw !== "") resultado = resultadoRaw.toLowerCase();
+
+        // Parse date DD/MM/YYYY
+        let fecha = null;
+        if (fechaRaw) {
+          const parts = fechaRaw.split("/");
+          if (parts.length === 3) {
+            let d = parseInt(parts[0]), mo = parseInt(parts[1]), y = parseInt(parts[2]);
+            if (y < 100) y += 2000;
+            if (d && mo && y) fecha = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          }
+        }
+        if (!fecha) fecha = new Date().toISOString().split("T")[0];
+
+        // Find cabra by last 6 digits of id_electronico (the reader gives the full number but only the last 6 identify the animal)
+        const last6 = idElecRaw.slice(-6);
+        const cabra = data.cabras.find(c => c.id_electronico && c.id_electronico.trim().slice(-6) === last6);
+        if (!cabra) {
+          errorList.push(`ID ...${last6}: no encontrada en el sistema`);
+          errors++;
+          continue;
+        }
+
+        // Check duplicate: same cabra + paridera + same resultado
+        const existeDuplicada = ecosExistentes.find(e => e.cabra_id === cabra.id && e.resultado === resultado);
+        if (existeDuplicada) { skipped++; continue; }
+
+        // Insert ecografia
+        const { error: errEco } = await supabase.from("ecografia").insert([{
+          cabra_id: cabra.id,
+          paridera_id: parideraId,
+          fecha,
+          resultado,
+        }]);
+        if (errEco) { errors++; errorList.push(`${cabra.crotal}: ${errEco.message}`); continue; }
+
+        // Cross-reference and update estado_ginecologico
+        if (resultado === "vacia") {
+          vacias++;
+          vaciaList.push(cabra.crotal);
+
+          // Check for doble vacia: cabra already had a vacia eco (any paridera)
+          const ecosPrevias = data.ecografias.filter(e => e.cabra_id === cabra.id && e.resultado === "vacia");
+          // Also check within this same import batch (previous paridera eco was vacia)
+          const ecoMismaParidera = ecosExistentes.find(e => e.cabra_id === cabra.id && e.resultado === "vacia");
+
+          if (ronda === "segunda" && ecoMismaParidera) {
+            // 2nd round vacia + 1st round was also vacia = doble vacia in this paridera
+            dobleVacias++;
+            dobleVaciaList.push(cabra.crotal);
+            await supabase.from("cabra").update({ estado_ginecologico: "doble_vacia" }).eq("id", cabra.id);
+          } else if (ecosPrevias.length >= 1 && ronda === "segunda") {
+            // Had previous vacias in other parideras
+            dobleVacias++;
+            dobleVaciaList.push(cabra.crotal);
+            await supabase.from("cabra").update({ estado_ginecologico: "doble_vacia" }).eq("id", cabra.id);
+          } else {
+            await supabase.from("cabra").update({ estado_ginecologico: "vacia" }).eq("id", cabra.id);
+          }
+        } else if (resultado === "hidrometra") {
+          hidrometras++;
+          hidrometraList.push(cabra.crotal);
+          await supabase.from("cabra").update({ estado_ginecologico: "hidrometra" }).eq("id", cabra.id);
+        } else {
+          gestantes++;
+          // If cabra was marked vacia before and now is gestante (recovered in 2nd eco)
+          if (ronda === "segunda" && cabra.estado_ginecologico === "vacia") {
+            await supabase.from("cabra").update({ estado_ginecologico: "gestante" }).eq("id", cabra.id);
+          }
+        }
+      } catch (err) {
+        errors++;
+        errorList.push(`Fila: ${err.message}`);
+      }
+    }
+
+    const total = gestantes + vacias + hidrometras;
+    setImportResult({ imported: total, errors, errorList, total: dataRows.length, tipo: "ecografia",
+      detalle: { gestantes, vacias, hidrometras, dobleVacias, skipped } });
+    setImporting(false);
+    refresh();
+
+    // Build detailed chat summary
+    let chatMsg = `\u2705 **Ecografias importadas** (${ronda === "primera" ? "1a ronda" : "2a ronda"} - ${parideraNombre})\n\n`;
+    chatMsg += `\uD83D\uDFE2 **${gestantes}** gestantes (todo correcto)\n`;
+    chatMsg += `\uD83D\uDD34 **${vacias}** vacias`;
+    if (vaciaList.length > 0) chatMsg += `: ${vaciaList.join(", ")}`;
+    chatMsg += `\n`;
+    if (hidrometras > 0) {
+      chatMsg += `\u26A0\uFE0F **${hidrometras}** hidrometras: ${hidrometraList.join(", ")}\n`;
+      chatMsg += `   _Hidrometra = pseudogestacion (liquido en utero sin feto). Requiere tratamiento con prostaglandinas._\n`;
+    }
+    if (dobleVacias > 0) {
+      chatMsg += `\n\uD83D\uDEA8 **${dobleVacias} DOBLE VACIAS**: ${dobleVaciaList.join(", ")}\n`;
+      chatMsg += `   _Candidatas a descarte o revision veterinaria urgente._\n`;
+    }
+    if (skipped > 0) chatMsg += `\n\u23ED\uFE0F ${skipped} ya existian (no duplicadas)`;
+    if (errors > 0) chatMsg += `\n\uD83D\uDD34 ${errors} errores:\n${errorList.slice(0, 8).map(e => `  - ${e}`).join("\n")}`;
+    setMs(p => [...p, { role: "assistant", text: chatMsg }]);
+  };
+
   const readFile = async (file) => {
     setFileName(file.name);
     setImportResult(null);
     setCsvType(null);
+    setEcoOptions({ paridera_id: null, lote: null, ronda: null });
     try {
       const text = await readFileText(file);
       const rows = parseCSV(text);
@@ -2693,7 +2836,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
       setFileData({ "Datos": cleanRows.slice(0, 60) });
       
       setMs(p => [...p, { role: "user", text: `📎 ${file.name} subido (${cleanRows.length} filas, ${cleanRows[0]?.length || 0} columnas)` }]);
-      setMs(p => [...p, { role: "assistant", text: `Archivo cargado. Selecciona el tipo de datos:\n• 🥛 **Producción** — informe diario FLM\n• 🍼 **Paridera** — partos, abortos, vacías y crías\n• 💉 **Tratamientos** — vacunas, desparasitaciones, fertilidad\n• 🔬 **Inseminación** — registro de inseminaciones\n• 📋 **Anotaciones** — observaciones veterinarias\n\nUsa los botones de abajo para elegir.` }]);
+      setMs(p => [...p, { role: "assistant", text: `Archivo cargado. Selecciona el tipo de datos:\n\u2022 \uD83E\uDD5B **Producci\u00F3n** \u2014 informe diario FLM\n\u2022 \uD83C\uDF7C **Paridera** \u2014 partos, abortos, vac\u00EDas y cr\u00EDas\n\u2022 \uD83D\uDC89 **Tratamientos** \u2014 vacunas, desparasitaciones, fertilidad\n\u2022 \uD83D\uDD2C **Inseminaci\u00F3n** \u2014 registro de inseminaciones\n\u2022 \uD83D\uDCCB **Anotaciones** \u2014 observaciones veterinarias\n\u2022 \uD83D\uDD2C **Ecograf\u00EDas** \u2014 gestantes, vac\u00EDas, hidrometras\n\nUsa los botones de abajo para elegir.` }]);
     } catch (err) {
       setMs(p => [...p, { role: "assistant", text: `Error leyendo archivo: ${err.message}` }]);
     }
@@ -2818,7 +2961,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     setLd(false);
   };
 
-  const canImport = rawRows && csvType;
+  const canImport = rawRows && csvType && (csvType !== "ecografia" || (ecoOptions.paridera_id && ecoOptions.ronda));
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -2888,7 +3031,62 @@ function ImportadorPage({ data, refresh, saveChat }) {
                 }}>
                 📋 Anotaciones
               </button>
+              <button onClick={() => { setCsvType("ecografia"); setEcoOptions({ paridera_id: null, lote: null, ronda: null }); }}
+                style={{
+                  padding: "14px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  border: csvType === "ecografia" ? "2px solid #0D9488" : "2px solid #E2E8F0",
+                  background: csvType === "ecografia" ? "#F0FDFA" : "#FFF",
+                  color: csvType === "ecografia" ? "#0D9488" : "#64748B",
+                }}>
+                🔬 Ecografias
+              </button>
             </div>
+
+            {/* Eco options panel */}
+            {csvType === "ecografia" && (
+              <div style={{ marginTop: 12, padding: 16, background: "#F0FDFA", borderRadius: 12, border: "1px solid #99F6E4", display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0D9488" }}>Configurar ecografia</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", marginBottom: 4 }}>Paridera</div>
+                    <select value={ecoOptions.paridera_id || ""} onChange={e => setEcoOptions(p => ({ ...p, paridera_id: parseInt(e.target.value) || null }))}
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #CBD5E1", fontSize: 13, background: "#FFF", cursor: "pointer" }}>
+                      <option value="">Seleccionar...</option>
+                      {data.parideras.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", marginBottom: 4 }}>Lote ecografiado</div>
+                    <select value={ecoOptions.lote || ""} onChange={e => setEcoOptions(p => ({ ...p, lote: e.target.value || null }))}
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #CBD5E1", fontSize: 13, background: "#FFF", cursor: "pointer" }}>
+                      <option value="">Seleccionar...</option>
+                      {data.lotes.map(l => <option key={l.id} value={l.nombre}>{l.nombre} ({l.cabras} cabras)</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", marginBottom: 4 }}>Ronda de ecografia</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {["primera", "segunda"].map(r => (
+                      <button key={r} onClick={() => setEcoOptions(p => ({ ...p, ronda: r }))}
+                        style={{
+                          flex: 1, padding: "8px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                          border: ecoOptions.ronda === r ? "2px solid #0D9488" : "1px solid #CBD5E1",
+                          background: ecoOptions.ronda === r ? "#CCFBF1" : "#FFF",
+                          color: ecoOptions.ronda === r ? "#0D9488" : "#64748B",
+                        }}>
+                        {r === "primera" ? "1a Ecografia" : "2a Ecografia (repaso)"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {ecoOptions.paridera_id && ecoOptions.ronda && (
+                  <div style={{ fontSize: 11, color: "#0D9488", fontWeight: 600, padding: "6px 10px", background: "#CCFBF1", borderRadius: 6 }}>
+                    {"\u2705"} Listo: {ecoOptions.ronda === "primera" ? "1a" : "2a"} eco de {data.parideras.find(p => p.id === ecoOptions.paridera_id)?.nombre || "?"}{ecoOptions.lote ? ` (${ecoOptions.lote})` : ""}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -2900,11 +3098,12 @@ function ImportadorPage({ data, refresh, saveChat }) {
             else if (csvType === "paridera") importParidera(rawRows);
             else if (csvType === "tratamiento") importTratamiento(rawRows);
             else if (csvType === "inseminacion") importInseminacion(rawRows);
+            else if (csvType === "ecografia") importEcografia(rawRows);
           }} disabled={importing}
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
               background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
             }}>
-            {importing ? "⏳ Importando..." : csvType === "produccion" ? `🚀 Importar ${rawRows.length - 1} cabras a Supabase` : `📋 Importar ${rawRows.length - 1} anotaciones a Supabase`}
+            {importing ? "\u23F3 Importando..." : csvType === "produccion" ? `\uD83D\uDE80 Importar ${rawRows.length - 1} cabras a Supabase` : csvType === "ecografia" ? `\uD83D\uDD2C Importar ${rawRows.length} ecografias a Supabase` : `\uD83D\uDCCB Importar ${rawRows.length - 1} registros a Supabase`}
           </button>
         )}
 
@@ -2936,6 +3135,26 @@ function ImportadorPage({ data, refresh, saveChat }) {
               <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
                 <div style={{ fontSize: 20, fontWeight: 700, color: importResult.errors > 0 ? "#DC2626" : "#059669" }}>{importResult.errors}</div>
                 <div style={{ fontSize: 10, color: "#94A3B8" }}>Errores</div>
+              </div>
+            </div>
+            )}
+            {importResult.tipo === "ecografia" && importResult.detalle && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 10 }}>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#059669" }}>{importResult.detalle.gestantes}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Gestantes</div>
+              </div>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#DC2626" }}>{importResult.detalle.vacias}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Vacias</div>
+              </div>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#E8950A" }}>{importResult.detalle.hidrometras}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Hidrometras</div>
+              </div>
+              <div style={{ textAlign: "center", padding: 8, background: "#FFF", borderRadius: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: importResult.detalle.dobleVacias > 0 ? "#DC2626" : "#059669" }}>{importResult.detalle.dobleVacias}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>Doble vacias</div>
               </div>
             </div>
             )}

@@ -944,9 +944,46 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
   const [activeFolder, setActiveFolder] = useState(folders ? null : "__all__");
   const [activeSubfolder, setActiveSubfolder] = useState(null);
 
+  // Determine navigation level: "folders" | "subfolders" | "data"
+  const activeSubs = subfolders ? subfolders.filter(sf => sf.parent === activeFolder) : [];
+  const hasMultipleSubs = activeSubs.length > 1;
+  const level = !activeFolder ? "folders" : (subfolders && hasMultipleSubs && !activeSubfolder) ? "subfolders" : "data";
+
+  // For data level: if subfolders exist but only 1, auto-filter to that subfolder without needing selection
+  const effectiveSubfolder = activeSubfolder || (subfolders && activeSubs.length === 1 ? activeSubs[0].name : null);
+
   const currentData = activeFolder === "__all__" ? data :
-    folders ? data.filter(r => r.__folder === activeFolder && (!subfolders || !activeSubfolder || r.__subfolder === activeSubfolder)) : data;
+    folders ? data.filter(r => r.__folder === activeFolder && (!subfolders || !effectiveSubfolder || r.__subfolder === effectiveSubfolder)) : data;
   const f = currentData.filter(r => Object.values(r).some(v => String(v || "").toLowerCase().includes(s.toLowerCase())));
+
+  // Back button: go up one level
+  const goBack = () => {
+    if (activeSubfolder) { setActiveSubfolder(null); setS(""); }
+    else { setActiveFolder(null); setS(""); }
+  };
+
+  // Render a grid of clickable cards (used for folders and subfolders)
+  const renderCards = (items, onClick, getIcon) => (
+    <div style={{ flex: 1, overflow: "auto", padding: "20px 26px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+        {items.map((item, i) => (
+          <div key={i} onClick={() => onClick(item)}
+            style={{ background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 14, padding: "20px", cursor: "pointer", transition: "all .2s", display: "flex", alignItems: "center", gap: 14 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}50`; e.currentTarget.style.background = `${accent}06`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 16px ${accent}12`; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.background = "#FAFAFA"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
+          >
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+              {getIcon(item)}
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>{item.name}</div>
+              <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{item.count} registros</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.25)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn .2s" }} onClick={onClose}>
@@ -959,82 +996,30 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 16, fontWeight: 700, color: "#1E293B" }}>{title}</span>
                 {activeFolder && activeFolder !== "__all__" && (
-                  <span style={{ fontSize: 13, color: "#94A3B8" }}>{"\u203A"} {activeFolder}{activeSubfolder ? ` \u203A ${activeSubfolder}` : ""}</span>
+                  <span style={{ fontSize: 13, color: "#94A3B8" }}>{" > "}{activeFolder}{activeSubfolder ? " > " + activeSubfolder : ""}</span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "#94A3B8" }}>{activeFolder && (activeSubfolder || !subfolders) ? `${f.length} registros${onRowClick ? " \u00B7 Haz clic en una fila para ver historial" : ""}` : activeFolder && subfolders && !activeSubfolder ? `${subfolders.filter(sf => sf.parent === activeFolder).length} subcarpetas` : `${folders.length} carpetas`}</div>
+              <div style={{ fontSize: 12, color: "#94A3B8" }}>{level === "data" ? (f.length + " registros" + (onRowClick ? " - Haz clic en una fila para ver historial" : "")) : level === "subfolders" ? (activeSubs.length + " subcarpetas") : (folders.length + " carpetas")}</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {activeFolder && folders && (
-              <button onClick={() => { if (activeSubfolder) { setActiveSubfolder(null); setS(""); } else { setActiveFolder(null); setS(""); } }} style={{ padding: "7px 14px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 12, color: "#64748B", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
-                {"\u2190"} Volver
+              <button onClick={goBack} style={{ padding: "7px 14px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 12, color: "#64748B", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+                {"<-"} Volver
               </button>
             )}
-            <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 17, color: "#94A3B8", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+            <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #E2E8F0", background: "#F8FAFC", cursor: "pointer", fontSize: 17, color: "#94A3B8", display: "flex", alignItems: "center", justifyContent: "center" }}>x</button>
           </div>
         </div>
 
         {/* Folder view */}
-        {!activeFolder && folders && (
-          <div style={{ flex: 1, overflow: "auto", padding: "20px 26px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-              {folders.map((folder, i) => (
-                <div key={i} onClick={() => setActiveFolder(folder.name)}
-                  style={{
-                    background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 14,
-                    padding: "20px", cursor: "pointer", transition: "all .2s",
-                    display: "flex", alignItems: "center", gap: 14,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}50`; e.currentTarget.style.background = `${accent}06`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 16px ${accent}12`; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.background = "#FAFAFA"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
-                >
-                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
-                    📁
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>{folder.name}</div>
-                    <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{folder.count} registros</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {level === "folders" && folders && renderCards(folders, (folder) => setActiveFolder(folder.name), () => "📁")}
 
-        {/* Subfolder view — skip if only 1 subfolder (auto-select it) */}
-        {activeFolder && subfolders && !activeSubfolder && (() => {
-          const subs = subfolders.filter(sf => sf.parent === activeFolder);
-          if (subs.length === 1) { setTimeout(() => setActiveSubfolder(subs[0].name), 0); return null; }
-          return subs.length > 1 ? (
-            <div style={{ flex: 1, overflow: "auto", padding: "20px 26px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-                {subs.map((sf, i) => (
-                  <div key={i} onClick={() => setActiveSubfolder(sf.name)}
-                    style={{
-                      background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 14,
-                      padding: "20px", cursor: "pointer", transition: "all .2s",
-                      display: "flex", alignItems: "center", gap: 14,
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}50`; e.currentTarget.style.background = `${accent}06`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 16px ${accent}12`; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.background = "#FAFAFA"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
-                  >
-                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
-                      {sf.icon || "📂"}
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>{sf.name}</div>
-                      <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{sf.count} registros</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null;
-        })()}
+        {/* Subfolder view */}
+        {level === "subfolders" && renderCards(activeSubs, (sf) => setActiveSubfolder(sf.name), (sf) => sf.icon || "📂")}
 
         {/* Data view */}
-        {activeFolder && (!subfolders || activeSubfolder) && <>
+        {level === "data" && <>
           <div style={{ padding: "14px 26px", borderBottom: "1px solid #F1F5F9" }}>
             <div style={{ position: "relative" }}>
               <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 15 }}>🔍</span>
@@ -1925,10 +1910,16 @@ function DashboardPage({ data }) {
       })()}
 
       {modal === "eco" && (() => {
-        // Group ecografias by paridera + ronda (stored in DB field "ronda")
+        // Auto-migrate: update ecografias without ronda to "primera" in background
+        const ecosSinRonda = data.ecografias.filter(e => !e.ronda);
+        if (ecosSinRonda.length > 0) {
+          ecosSinRonda.forEach(e => { e.ronda = "primera"; });
+          Promise.all(ecosSinRonda.map(e => supabase.from("ecografia").update({ ronda: "primera" }).eq("id", e.id))).then(() => refresh());
+        }
+        // Group ecografias by paridera + ronda
         const d = ecosModal.map(e => {
           const p = e.paridera || "Sin paridera";
-          const rondaLabel = e.ronda === "segunda" ? "2a Ecografia (repaso)" : e.ronda === "primera" ? "1a Ecografia" : "Sin clasificar";
+          const rondaLabel = e.ronda === "segunda" ? "2a Ecografia (repaso)" : "1a Ecografia";
           return { ...e, __folder: p, __subfolder: rondaLabel };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));

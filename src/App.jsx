@@ -2744,18 +2744,13 @@ function ImportadorPage({ data, refresh, saveChat }) {
       setMs(p => [...p, { role: "assistant", text: "🗑️ Eliminadas " + ecosPreviasMismaRonda.length + " ecografias anteriores (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + ") para reimportar limpio." }]);
     }
 
-    // Step 2: Update existing ecografias without ronda to "primera" (they were the 1st round)
+    // Update existing ecografias without ronda to "primera" in background (don't block import)
     const ecosSinRonda = data.ecografias.filter(e => e.paridera_id === parideraId && !e.ronda);
     if (ecosSinRonda.length > 0) {
-      for (const eco of ecosSinRonda) {
-        await supabase.from("ecografia").update({ ronda: "primera" }).eq("id", eco.id);
-      }
-      setMs(p => [...p, { role: "assistant", text: "📋 Actualizadas " + ecosSinRonda.length + " ecografias anteriores sin clasificar → marcadas como 1a ronda." }]);
+      supabase.from("ecografia").update({ ronda: "primera" }).in("id", ecosSinRonda.map(e => e.id)).then(() => {
+        setMs(p => [...p, { role: "assistant", text: "📋 " + ecosSinRonda.length + " ecografias anteriores marcadas como 1a ronda." }]);
+      });
     }
-
-    // Get existing ecografias for this paridera (after updates) to detect doble vacias
-    const { data: ecosRefresh } = await supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)").eq("paridera_id", parideraId);
-    const ecosExistentes = ecosRefresh || [];
 
     let gestantes = 0, vacias = 0, hidrometras = 0, dobleVacias = 0, errors = 0, skipped = 0, totalParsed = 0;
     const errorList = [];
@@ -2803,19 +2798,14 @@ function ImportadorPage({ data, refresh, saveChat }) {
           continue;
         }
 
-        // Check duplicate: same cabra + paridera + same resultado + same ronda
-        const existeDuplicada = ecosExistentes.find(e => e.cabra_id === cabra.id && e.resultado === resultado && e.ronda === ronda);
-        if (existeDuplicada) { skipped++; continue; }
-
-        // Insert ecografia (with ronda field)
-        const { error: errEco } = await supabase.from("ecografia").insert([{
-          cabra_id: cabra.id,
-          paridera_id: parideraId,
-          fecha,
-          resultado,
-          ronda,
-        }]);
-        if (errEco) { errors++; errorList.push(`${cabra.crotal}: ${errEco.message}`); continue; }
+        // Insert ecografia (with ronda field) — no duplicate check, just insert
+        const insertData = { cabra_id: cabra.id, paridera_id: parideraId, fecha, resultado, ronda };
+        const { error: errEco } = await supabase.from("ecografia").insert([insertData]);
+        if (errEco) {
+          errors++;
+          errorList.push(cabra.crotal + ": " + errEco.message + " (code:" + (errEco.code || "?") + ")");
+          continue;
+        }
 
         // Cross-reference and update estado_ginecologico
         if (resultado === "vacia") {
@@ -2878,9 +2868,11 @@ function ImportadorPage({ data, refresh, saveChat }) {
       chatMsg += "\n🚨 **" + dobleVacias + " DOBLE VACIAS**: " + dobleVaciaList.join(", ") + "\n";
       chatMsg += "   _Candidatas a descarte o revision veterinaria urgente._\n";
     }
-    if (skipped > 0) chatMsg += "\n⏭️ " + skipped + " ya existian (no duplicadas)";
-    if (errors > 0) chatMsg += "\n🔴 " + errors + " errores:\n" + errorList.slice(0, 15).map(function(e) { return "  - " + e; }).join("\n");
-    if (total === 0 && errors > 0) chatMsg += "\n\n⚠️ No se importo ninguna ecografia. Revisa que los id_electronico del CSV coincidan con los de las cabras en el sistema.";
+    if (skipped > 0) chatMsg += "\n⏭️ " + skipped + " duplicadas (ya existian con misma ronda)";
+    if (errors > 0) chatMsg += "\n🔴 " + errors + " errores:\n" + errorList.map(function(e) { return "  - " + e; }).join("\n");
+    if (total === 0 && errors === 0 && skipped === 0) chatMsg += "\n\n⚠️ No se encontraron filas validas en el CSV.";
+    if (total === 0 && errors > 0) chatMsg += "\n\n⚠️ NINGUNA ecografia importada. Los errores de arriba explican por que.";
+    chatMsg += "\n\n_Ronda guardada: " + ronda + " | Paridera ID: " + parideraId + "_";
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
   };
 

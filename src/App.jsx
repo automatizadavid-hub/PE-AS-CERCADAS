@@ -2752,17 +2752,25 @@ function ImportadorPage({ data, refresh, saveChat }) {
     const hasHeader = firstRowText.includes("crotal") || firstRowText.includes("resultado") || firstRowText.includes("electronico") || firstRowText.includes("identificador");
     const dataRows = hasHeader ? rows.slice(1) : rows;
 
-    // Delete existing ecografias for this paridera+ronda to allow clean re-imports
-    const ecosPreviasMismaRonda = data.ecografias.filter(e => e.paridera_id === parideraId && (e.ronda === ronda || (!e.ronda && ronda)));
+    // Step 1: Delete ONLY ecografias that match this exact paridera+ronda (for clean re-imports)
+    const ecosPreviasMismaRonda = data.ecografias.filter(e => e.paridera_id === parideraId && e.ronda === ronda);
     if (ecosPreviasMismaRonda.length > 0) {
-      const idsToDelete = ecosPreviasMismaRonda.map(e => e.id);
-      for (const id of idsToDelete) {
-        await supabase.from("ecografia").delete().eq("id", id);
+      for (const eco of ecosPreviasMismaRonda) {
+        await supabase.from("ecografia").delete().eq("id", eco.id);
       }
-      setMs(p => [...p, { role: "assistant", text: "🗑️ Eliminadas " + idsToDelete.length + " ecografias anteriores de " + parideraNombre + " (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + ") para reimportar limpio." }]);
+      setMs(p => [...p, { role: "assistant", text: "🗑️ Eliminadas " + ecosPreviasMismaRonda.length + " ecografias anteriores (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + ") para reimportar limpio." }]);
     }
 
-    // Get existing ecografias for this paridera (after cleanup) to detect doble vacias
+    // Step 2: Update existing ecografias without ronda to "primera" (they were the 1st round)
+    const ecosSinRonda = data.ecografias.filter(e => e.paridera_id === parideraId && !e.ronda);
+    if (ecosSinRonda.length > 0) {
+      for (const eco of ecosSinRonda) {
+        await supabase.from("ecografia").update({ ronda: "primera" }).eq("id", eco.id);
+      }
+      setMs(p => [...p, { role: "assistant", text: "📋 Actualizadas " + ecosSinRonda.length + " ecografias anteriores sin clasificar → marcadas como 1a ronda." }]);
+    }
+
+    // Get existing ecografias for this paridera (after updates) to detect doble vacias
     const { data: ecosRefresh } = await supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)").eq("paridera_id", parideraId);
     const ecosExistentes = ecosRefresh || [];
 

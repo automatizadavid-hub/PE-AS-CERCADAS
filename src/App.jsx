@@ -2843,11 +2843,11 @@ function ImportadorPage({ data, refresh, saveChat }) {
       setImportResult({ imported: ok, errors: fail + notFound, errorList: msgs, total: dataRows.length, tipo: "ecografia",
         detalle: { gestantes: 0, vacias: 0, hidrometras: 0, dobleVacias: 0, skipped: 0 } });
 
-      window.alert("Ecografias: " + ok + " importadas, " + fail + " errores, " + notFound + " no encontradas\n\n" + msgs.join("\n"));
+      // Summary shown in chat (no alert needed)
 
     } catch (err) {
       setImporting(false);
-      window.alert("ERROR: " + err.message);
+      // Error shown in chat
       setMs(function(p) { return [].concat(p, [{ role: "assistant", text: "ERROR FATAL: " + err.message + "\n" + (err.stack || "") }]); });
     }
   };
@@ -3124,14 +3124,12 @@ function ImportadorPage({ data, refresh, saveChat }) {
           <button type="button" onClick={function(ev) {
             ev.preventDefault();
             ev.stopPropagation();
-            window.alert("BOTON PULSADO. csvType=" + csvType + " rows=" + (rawRows ? rawRows.length : "null"));
             if (csvType === "produccion") importProduction(rawRows);
             else if (csvType === "anotaciones") importAnotaciones(rawRows);
             else if (csvType === "paridera") importParidera(rawRows);
             else if (csvType === "tratamiento") importTratamiento(rawRows);
             else if (csvType === "inseminacion") importInseminacion(rawRows);
             else if (csvType === "ecografia") importEcografia(rawRows);
-            else window.alert("csvType NO RECONOCIDO: " + csvType);
           }} disabled={importing}
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
               background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
@@ -5083,21 +5081,27 @@ function SanidadPage({ data, refresh, saveChat }) {
     setSanLd(false);
   };
 
-  // Save veterinary note
+  // Save veterinary note (with double-click protection)
+  const [savingNote, setSavingNote] = useState(false);
   const saveNote = async () => {
-    if (!newNote.texto.trim()) return;
-    let cabra_id = null;
-    if (newNote.cabra_crotal.trim()) {
-      const cabra = data.cabras.find(c => c.crotal === newNote.cabra_crotal.trim());
-      if (cabra) cabra_id = cabra.id;
+    if (!newNote.texto.trim() || savingNote) return;
+    setSavingNote(true);
+    try {
+      let cabra_id = null;
+      if (newNote.cabra_crotal.trim()) {
+        const cabra = data.cabras.find(c => c.crotal === newNote.cabra_crotal.trim());
+        if (cabra) cabra_id = cabra.id;
+      }
+      await supabase.from("anotacion_veterinaria").insert([{
+        cabra_id, fecha: new Date().toISOString().split("T")[0],
+        texto: newNote.texto, tipo: newNote.tipo, autor: "Veterinario",
+      }]);
+      setNewNote({ cabra_crotal: "", texto: "", tipo: "individual" });
+      setShowAddNote(false);
+      refresh();
+    } finally {
+      setSavingNote(false);
     }
-    await supabase.from("anotacion_veterinaria").insert([{
-      cabra_id, fecha: new Date().toISOString().split("T")[0],
-      texto: newNote.texto, tipo: newNote.tipo, autor: "Veterinario",
-    }]);
-    setNewNote({ cabra_crotal: "", texto: "", tipo: "individual" });
-    setShowAddNote(false);
-    refresh();
   };
 
   // Resolve alert
@@ -5300,7 +5304,7 @@ function SanidadPage({ data, refresh, saveChat }) {
               </div>
               <textarea value={newNote.texto} onChange={e => setNewNote({ ...newNote, texto: e.target.value })} placeholder="Describe la observación del veterinario..." rows={3} style={{ width: "100%", padding: "10px 14px", borderRadius: 9, border: "2px solid #E2E8F0", fontSize: 13, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box", resize: "vertical", fontFamily: "'Outfit', sans-serif" }} />
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button onClick={saveNote} style={{ padding: "8px 20px", borderRadius: 9, border: "none", background: "#0891B2", color: "#FFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Guardar anotación</button>
+                <button onClick={saveNote} disabled={savingNote} style={{ padding: "8px 20px", borderRadius: 9, border: "none", background: savingNote ? "#94A3B8" : "#0891B2", color: "#FFF", fontSize: 12, fontWeight: 600, cursor: savingNote ? "wait" : "pointer" }}>{savingNote ? "Guardando..." : "Guardar anotación"}</button>
                 <button onClick={() => setShowAddNote(false)} style={{ padding: "8px 20px", borderRadius: 9, border: "1px solid #E2E8F0", background: "#FFF", color: "#64748B", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
               </div>
             </div>
@@ -5510,17 +5514,21 @@ function AnomalíasPage({ data, refresh }) {
       const today = new Date().toISOString().split("T")[0];
       const todayBD = anomaliasBD.filter(a => a.fecha === today);
       if (todayBD.length > 0 || anomaliasVivas.length === 0) return;
-      const toInsert = anomaliasVivas.map(a => ({
-        fecha: today, tipo: a.tipo, severidad: a.severidad, crotal: a.crotal,
-        lote_nombre: a.lote, descripcion: a.descripcion, hipotesis: a.hipotesis, accion: a.accion,
-      }));
+      // Deduplicate: only insert anomalias not already in BD (by crotal+tipo)
+      const existingKeys = new Set(anomaliasBD.map(a => a.crotal + "|" + a.tipo + "|" + a.estado));
+      const toInsert = anomaliasVivas
+        .filter(a => !existingKeys.has(a.crotal + "|" + a.tipo + "|pendiente"))
+        .map(a => ({
+          fecha: today, tipo: a.tipo, severidad: a.severidad, crotal: a.crotal,
+          lote_nombre: a.lote, descripcion: a.descripcion, hipotesis: a.hipotesis, accion: a.accion,
+        }));
       if (toInsert.length > 0) {
         await supabase.from("anomalia_detectada").insert(toInsert);
         refresh();
       }
     };
     persistir();
-  }, [anomaliasVivas.length]);
+  }, []);
 
   const updateEstado = async (id, estado) => {
     const updates = { estado };

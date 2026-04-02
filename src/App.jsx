@@ -2722,7 +2722,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
   const importEcografia = async (rows) => {
     setImporting(true);
     setImportResult(null);
-
+    try {
     const parideraId = ecoOptions.paridera_id;
     const ronda = ecoOptions.ronda;
     const loteEco = ecoOptions.lote;
@@ -2732,7 +2732,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
 
     // Detect if first row is a header (contains text like "crotal", "resultado", etc.)
     const firstRowText = normalizeText((rows[0] || []).join(" "));
-    const hasHeader = firstRowText.includes("crotal") || firstRowText.includes("resultado") || firstRowText.includes("electronico") || firstRowText.includes("identificador");
+    const hasHeader = firstRowText.includes("crotal") || firstRowText.includes("resultado") || firstRowText.includes("identificador");
     const dataRows = hasHeader ? rows.slice(1) : rows;
 
     // Step 1: Delete ONLY ecografias that match this exact paridera+ronda (for clean re-imports)
@@ -2874,6 +2874,10 @@ function ImportadorPage({ data, refresh, saveChat }) {
     if (total === 0 && errors > 0) chatMsg += "\n\n⚠️ NINGUNA ecografia importada. Los errores de arriba explican por que.";
     chatMsg += "\n\n_Ronda guardada: " + ronda + " | Paridera ID: " + parideraId + "_";
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
+    } catch (fatalErr) {
+      setImporting(false);
+      setMs(p => [...p, { role: "assistant", text: "🔴 ERROR FATAL en importacion: " + (fatalErr.message || String(fatalErr)) + "\n\nStack: " + (fatalErr.stack || "no stack") }]);
+    }
   };
 
   const readFile = async (file) => {

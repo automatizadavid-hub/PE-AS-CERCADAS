@@ -3149,7 +3149,8 @@ function ImportadorPage({ data, refresh, saveChat }) {
 
         {/* Import button */}
         {canImport && !importResult && (
-          <button onClick={() => {
+          <button type="button" onClick={(ev) => {
+            ev.preventDefault();
             if (csvType === "produccion") importProduction(rawRows);
             else if (csvType === "anotaciones") importAnotaciones(rawRows);
             else if (csvType === "paridera") importParidera(rawRows);

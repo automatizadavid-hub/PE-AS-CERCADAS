@@ -2727,8 +2727,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     var parideraNombre = data.parideras.find(function(p) { return p.id === parideraId; });
     parideraNombre = parideraNombre ? parideraNombre.nombre : "?";
 
-    // ALERT so user definitely sees it
-    window.alert("Importando " + rows.length + " ecografias como " + ronda + " de " + parideraNombre + " (paridera_id=" + parideraId + ")");
+    setMs(function(p) { return [].concat(p, [{ role: "assistant", text: "🔬 Importando " + rows.length + " ecografias (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + ") de " + parideraNombre }]); });
 
     try {
       // Skip header if present
@@ -2750,8 +2749,20 @@ function ImportadorPage({ data, refresh, saveChat }) {
         var idRaw = (row[0] || "").trim();
         if (!idRaw || idRaw.length < 5) continue;
 
-        var resRaw = (row[3] || "").trim().toUpperCase();
-        var fechaRaw = (row[4] || "").trim();
+        // Auto-detect columns: find resultado (VACIA/HIDROMETRA/empty) and fecha (DD/MM/YYYY) in ANY position
+        var resRaw = "";
+        var fechaRaw = "";
+        for (var ci = 1; ci < row.length; ci++) {
+          var cell = (row[ci] || "").trim();
+          var cellUp = cell.toUpperCase();
+          if (cellUp === "VACIA" || cellUp === "HIDROMETRA" || cellUp.indexOf("HIDRO") >= 0) {
+            resRaw = cellUp;
+          } else if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(cell)) {
+            fechaRaw = cell;
+          }
+        }
+        // If no resultado found in any column, check for empty columns (between ;;; means gestante)
+        if (!resRaw) resRaw = "";
 
         // Resultado
         var resultado = "gestante";
@@ -2832,11 +2843,11 @@ function ImportadorPage({ data, refresh, saveChat }) {
       setImportResult({ imported: ok, errors: fail + notFound, errorList: msgs, total: dataRows.length, tipo: "ecografia",
         detalle: { gestantes: 0, vacias: 0, hidrometras: 0, dobleVacias: 0, skipped: 0 } });
 
-      window.alert("Importacion terminada: " + ok + " OK, " + fail + " errores, " + notFound + " no encontradas");
+      window.alert("Ecografias: " + ok + " importadas, " + fail + " errores, " + notFound + " no encontradas");
 
     } catch (err) {
       setImporting(false);
-      window.alert("ERROR FATAL: " + err.message);
+      window.alert("ERROR: " + err.message);
       setMs(function(p) { return [].concat(p, [{ role: "assistant", text: "ERROR FATAL: " + err.message + "\n" + (err.stack || "") }]); });
     }
   };

@@ -2759,63 +2759,65 @@ function ImportadorPage({ data, refresh, saveChat }) {
     const vaciaList = [];
     const gestanteList = [];
 
-    for (const row of dataRows) {
+    // DEBUG: Show first row raw data
+    setMs(p => [...p, { role: "assistant", text: "DEBUG fila 1 raw: [" + (dataRows[0] || []).map(function(c,i) { return i + "=" + JSON.stringify(c); }).join(", ") + "]" }]);
+
+    const resultados = [];
+    for (let ri = 0; ri < dataRows.length; ri++) {
+      const row = dataRows[ri];
       try {
-        // Parse: [0]=id_electronico, [3]=resultado, [4]=fecha
         const idElecRaw = (row[0] || "").trim();
-        if (!idElecRaw || idElecRaw.length < 5) continue;
+        if (!idElecRaw || idElecRaw.length < 5) { resultados.push("fila " + ri + ": skip (id corto)"); continue; }
         totalParsed++;
 
         const resultadoRaw = (row[3] || "").trim().toUpperCase();
         const fechaRaw = (row[4] || "").trim();
 
-        // Determine resultado
         let resultado = "gestante";
-        if (resultadoRaw === "VACIA" || resultadoRaw === "VAC\u00CDA") resultado = "vacia";
+        if (resultadoRaw === "VACIA" || resultadoRaw === "VACIA") resultado = "vacia";
         else if (resultadoRaw.includes("HIDROMETRA") || resultadoRaw.includes("HIDRO")) resultado = "hidrometra";
         else if (resultadoRaw !== "") resultado = resultadoRaw.toLowerCase();
 
-        // Parse date DD/MM/YYYY
         let fecha = null;
         if (fechaRaw) {
           const parts = fechaRaw.split("/");
           if (parts.length === 3) {
             let d = parseInt(parts[0]), mo = parseInt(parts[1]), y = parseInt(parts[2]);
             if (y < 100) y += 2000;
-            if (d && mo && y) fecha = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+            if (d && mo && y) fecha = y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0");
           }
         }
         if (!fecha) fecha = new Date().toISOString().split("T")[0];
 
-        // Find cabra: try id_electronico first (last 6 digits), then crotal (last 6 digits), then crotal directly
+        // Find cabra by last 6 digits
         const last6 = idElecRaw.slice(-6);
-        let cabra = data.cabras.find(c => c.id_electronico && c.id_electronico.trim().slice(-6) === last6);
-        if (!cabra) cabra = data.cabras.find(c => c.crotal && c.crotal.trim() === last6);
-        if (!cabra) cabra = data.cabras.find(c => c.crotal && c.crotal.trim().slice(-6) === last6);
+        let cabra = data.cabras.find(function(c) { return c.id_electronico && c.id_electronico.trim().slice(-6) === last6; });
+        if (!cabra) cabra = data.cabras.find(function(c) { return c.crotal && c.crotal.trim() === last6; });
+        if (!cabra) cabra = data.cabras.find(function(c) { return c.crotal && c.crotal.trim().slice(-6) === last6; });
+
         if (!cabra) {
-          errorList.push("ID ..." + last6 + ": no encontrada en el sistema");
+          errorList.push("..." + last6 + ": no encontrada");
           errors++;
+          resultados.push("fila " + ri + ": cabra " + last6 + " NO encontrada");
           continue;
         }
 
-        // Insert ecografia (with ronda field) — no duplicate check, just insert
-        const insertData = { cabra_id: cabra.id, paridera_id: parideraId, fecha, resultado, ronda };
-        const { error: errEco } = await supabase.from("ecografia").insert([insertData]);
-        if (errEco) {
+        // INSERT
+        var insertObj = { cabra_id: cabra.id, paridera_id: parideraId, fecha: fecha, resultado: resultado, ronda: ronda };
+        var resp = await supabase.from("ecografia").insert([insertObj]);
+        if (resp.error) {
           errors++;
-          errorList.push(cabra.crotal + ": " + errEco.message + " (code:" + (errEco.code || "?") + ")");
+          errorList.push(cabra.crotal + ": " + resp.error.message);
+          resultados.push("fila " + ri + ": " + cabra.crotal + " INSERT ERROR: " + resp.error.message);
           continue;
         }
 
-        // Cross-reference and update estado_ginecologico
+        // Update estado_ginecologico
         if (resultado === "vacia") {
           vacias++;
           vaciaList.push(cabra.crotal);
-
-          // Check for doble vacia: cabra already had a vacia eco (any paridera)
-          const ecosPrevias = data.ecografias.filter(e => e.cabra_id === cabra.id && e.resultado === "vacia");
-
-          if (ronda === "segunda" && ecosPrevias.length >= 1) {
+          var prevVacias = data.ecografias.filter(function(e) { return e.cabra_id === cabra.id && e.resultado === "vacia"; });
+          if (ronda === "segunda" && prevVacias.length >= 1) {
             dobleVacias++;
             dobleVaciaList.push(cabra.crotal);
             await supabase.from("cabra").update({ estado_ginecologico: "doble_vacia" }).eq("id", cabra.id);
@@ -2828,43 +2830,29 @@ function ImportadorPage({ data, refresh, saveChat }) {
           await supabase.from("cabra").update({ estado_ginecologico: "hidrometra" }).eq("id", cabra.id);
         } else {
           gestantes++;
-          // If cabra was marked vacia before and now is gestante (recovered in 2nd eco)
           if (ronda === "segunda" && cabra.estado_ginecologico === "vacia") {
             await supabase.from("cabra").update({ estado_ginecologico: "gestante" }).eq("id", cabra.id);
           }
         }
+        resultados.push("fila " + ri + ": " + cabra.crotal + " -> " + resultado + " OK");
       } catch (err) {
         errors++;
-        errorList.push(`Fila: ${err.message}`);
+        errorList.push("Fila " + ri + ": " + err.message);
+        resultados.push("fila " + ri + ": CRASH " + err.message);
       }
     }
 
-    const total = gestantes + vacias + hidrometras;
-    setImportResult({ imported: total, errors, errorList, total: totalParsed, tipo: "ecografia",
-      detalle: { gestantes, vacias, hidrometras, dobleVacias, skipped } });
+    // Show per-row results
+    setMs(p => [...p, { role: "assistant", text: "RESULTADO POR FILA:\n" + resultados.join("\n") }]);
+
+    var total = gestantes + vacias + hidrometras;
+    setImportResult({ imported: total, errors: errors, errorList: errorList, total: totalParsed, tipo: "ecografia",
+      detalle: { gestantes: gestantes, vacias: vacias, hidrometras: hidrometras, dobleVacias: dobleVacias, skipped: skipped } });
     setImporting(false);
     refresh();
 
-    // Build detailed chat summary
-    let chatMsg = "**Ecografias importadas** (" + (ronda === "primera" ? "1a ronda" : "2a ronda") + " - " + parideraNombre + ")\n";
-    chatMsg += "Filas procesadas: " + totalParsed + " | Importadas: " + total + " | Errores: " + errors + "\n\n";
-    if (gestantes > 0) chatMsg += "🟢 **" + gestantes + "** gestantes\n";
-    if (vacias > 0) {
-      chatMsg += "🔴 **" + vacias + "** vacias: " + vaciaList.join(", ") + "\n";
-    }
-    if (hidrometras > 0) {
-      chatMsg += "⚠️ **" + hidrometras + "** hidrometras: " + hidrometraList.join(", ") + "\n";
-      chatMsg += "   _Hidrometra = pseudogestacion. Requiere tratamiento con prostaglandinas._\n";
-    }
-    if (dobleVacias > 0) {
-      chatMsg += "\n🚨 **" + dobleVacias + " DOBLE VACIAS**: " + dobleVaciaList.join(", ") + "\n";
-      chatMsg += "   _Candidatas a descarte o revision veterinaria urgente._\n";
-    }
-    if (skipped > 0) chatMsg += "\n⏭️ " + skipped + " duplicadas (ya existian con misma ronda)";
-    if (errors > 0) chatMsg += "\n🔴 " + errors + " errores:\n" + errorList.map(function(e) { return "  - " + e; }).join("\n");
-    if (total === 0 && errors === 0 && skipped === 0) chatMsg += "\n\n⚠️ No se encontraron filas validas en el CSV.";
-    if (total === 0 && errors > 0) chatMsg += "\n\n⚠️ NINGUNA ecografia importada. Los errores de arriba explican por que.";
-    chatMsg += "\n\n_Ronda guardada: " + ronda + " | Paridera ID: " + parideraId + "_";
+    var chatMsg = "**Resumen:** " + total + " importadas, " + errors + " errores, " + totalParsed + " procesadas\n";
+    chatMsg += "Ronda: " + ronda + " | Paridera ID: " + parideraId;
     setMs(p => [...p, { role: "assistant", text: chatMsg }]);
     } catch (fatalErr) {
       setImporting(false);

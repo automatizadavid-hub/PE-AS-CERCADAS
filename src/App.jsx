@@ -3110,14 +3110,17 @@ function ImportadorPage({ data, refresh, saveChat }) {
 
         {/* Import button */}
         {canImport && !importResult && (
-          <button type="button" onClick={(ev) => {
+          <button type="button" onClick={function(ev) {
             ev.preventDefault();
+            ev.stopPropagation();
+            window.alert("BOTON PULSADO. csvType=" + csvType + " rows=" + (rawRows ? rawRows.length : "null"));
             if (csvType === "produccion") importProduction(rawRows);
             else if (csvType === "anotaciones") importAnotaciones(rawRows);
             else if (csvType === "paridera") importParidera(rawRows);
             else if (csvType === "tratamiento") importTratamiento(rawRows);
             else if (csvType === "inseminacion") importInseminacion(rawRows);
             else if (csvType === "ecografia") importEcografia(rawRows);
+            else window.alert("csvType NO RECONOCIDO: " + csvType);
           }} disabled={importing}
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
               background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",

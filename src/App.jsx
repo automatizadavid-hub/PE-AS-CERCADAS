@@ -2843,7 +2843,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
       setImportResult({ imported: ok, errors: fail + notFound, errorList: msgs, total: dataRows.length, tipo: "ecografia",
         detalle: { gestantes: 0, vacias: 0, hidrometras: 0, dobleVacias: 0, skipped: 0 } });
 
-      window.alert("Ecografias: " + ok + " importadas, " + fail + " errores, " + notFound + " no encontradas");
+      window.alert("Ecografias: " + ok + " importadas, " + fail + " errores, " + notFound + " no encontradas\n\n" + msgs.join("\n"));
 
     } catch (err) {
       setImporting(false);

@@ -946,14 +946,10 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
 
   // Determine navigation level: "folders" | "subfolders" | "data"
   const activeSubs = subfolders ? subfolders.filter(sf => sf.parent === activeFolder) : [];
-  const hasMultipleSubs = activeSubs.length > 1;
-  const level = !activeFolder ? "folders" : (subfolders && hasMultipleSubs && !activeSubfolder) ? "subfolders" : "data";
-
-  // For data level: if subfolders exist but only 1, auto-filter to that subfolder without needing selection
-  const effectiveSubfolder = activeSubfolder || (subfolders && activeSubs.length === 1 ? activeSubs[0].name : null);
+  const level = !activeFolder ? "folders" : (subfolders && activeSubs.length > 0 && !activeSubfolder) ? "subfolders" : "data";
 
   const currentData = activeFolder === "__all__" ? data :
-    folders ? data.filter(r => r.__folder === activeFolder && (!subfolders || !effectiveSubfolder || r.__subfolder === effectiveSubfolder)) : data;
+    folders ? data.filter(r => r.__folder === activeFolder && (!activeSubfolder || r.__subfolder === activeSubfolder)) : data;
   const f = currentData.filter(r => Object.values(r).some(v => String(v || "").toLowerCase().includes(s.toLowerCase())));
 
   // Back button: go up one level
@@ -1910,16 +1906,12 @@ function DashboardPage({ data }) {
       })()}
 
       {modal === "eco" && (() => {
-        // Auto-migrate: update ecografias without ronda to "primera" in background
-        const ecosSinRonda = data.ecografias.filter(e => !e.ronda);
-        if (ecosSinRonda.length > 0) {
-          ecosSinRonda.forEach(e => { e.ronda = "primera"; });
-          Promise.all(ecosSinRonda.map(e => supabase.from("ecografia").update({ ronda: "primera" }).eq("id", e.id))).then(() => refresh());
-        }
         // Group ecografias by paridera + ronda
+        // Treat null ronda as "primera" in UI (old records before ronda column existed)
         const d = ecosModal.map(e => {
           const p = e.paridera || "Sin paridera";
-          const rondaLabel = e.ronda === "segunda" ? "2a Ecografia (repaso)" : "1a Ecografia";
+          const effectiveRonda = e.ronda || "primera";
+          const rondaLabel = effectiveRonda === "segunda" ? "2a Ecografia (repaso)" : "1a Ecografia";
           return { ...e, __folder: p, __subfolder: rondaLabel };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));

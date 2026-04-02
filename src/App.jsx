@@ -2803,8 +2803,8 @@ function ImportadorPage({ data, refresh, saveChat }) {
           continue;
         }
 
-        // Check duplicate: same cabra + paridera + same resultado
-        const existeDuplicada = ecosExistentes.find(e => e.cabra_id === cabra.id && e.resultado === resultado);
+        // Check duplicate: same cabra + paridera + same resultado + same ronda
+        const existeDuplicada = ecosExistentes.find(e => e.cabra_id === cabra.id && e.resultado === resultado && e.ronda === ronda);
         if (existeDuplicada) { skipped++; continue; }
 
         // Insert ecografia (with ronda field)

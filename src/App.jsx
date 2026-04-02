@@ -2814,16 +2814,8 @@ function ImportadorPage({ data, refresh, saveChat }) {
 
           // Check for doble vacia: cabra already had a vacia eco (any paridera)
           const ecosPrevias = data.ecografias.filter(e => e.cabra_id === cabra.id && e.resultado === "vacia");
-          // Also check within this same import batch (previous paridera eco was vacia)
-          const ecoMismaParidera = ecosExistentes.find(e => e.cabra_id === cabra.id && e.resultado === "vacia");
 
-          if (ronda === "segunda" && ecoMismaParidera) {
-            // 2nd round vacia + 1st round was also vacia = doble vacia in this paridera
-            dobleVacias++;
-            dobleVaciaList.push(cabra.crotal);
-            await supabase.from("cabra").update({ estado_ginecologico: "doble_vacia" }).eq("id", cabra.id);
-          } else if (ecosPrevias.length >= 1 && ronda === "segunda") {
-            // Had previous vacias in other parideras
+          if (ronda === "segunda" && ecosPrevias.length >= 1) {
             dobleVacias++;
             dobleVaciaList.push(cabra.crotal);
             await supabase.from("cabra").update({ estado_ginecologico: "doble_vacia" }).eq("id", cabra.id);

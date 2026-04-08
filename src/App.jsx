@@ -854,7 +854,7 @@ function useSupabaseData() {
         supabase.from("lote").select("*"),
         supabase.from("parto").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
         supabase.from("ecografia").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
-        supabase.from("tratamiento").select("*, cabra:cabra_id(crotal)"),
+        supabase.from("tratamiento").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)"),
         supabase.from("cubricion").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre), macho:macho_id(crotal)"),
         supabase.from("cria").select("*, madre:madre_id(crotal)"),
         supabase.from("regla").select("id, nombre, categoria, tipo, severidad"),
@@ -864,7 +864,7 @@ function useSupabaseData() {
         supabase.from("evento_calendario").select("*").order("fecha", { ascending: true }),
         supabase.from("produccion_leche").select("*").order("fecha", { ascending: false }).limit(15000),
         supabase.from("resumen_diario").select("*").order("fecha", { ascending: false }).limit(30),
-        supabase.from("anotacion_veterinaria").select("*, cabra:cabra_id(crotal)").order("fecha", { ascending: false }).limit(200),
+        supabase.from("anotacion_veterinaria").select("*, cabra:cabra_id(crotal), paridera:paridera_id(nombre)").order("fecha", { ascending: false }).limit(200),
         supabase.from("alerta_sanitaria").select("*").order("fecha", { ascending: false }).limit(200),
         supabase.from("chat_guardado").select("*").order("fecha", { ascending: false }).limit(50),
         supabase.from("anomalia_detectada").select("*").order("fecha", { ascending: false }).limit(300),
@@ -2133,6 +2133,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
   const [csvType, setCsvType] = useState(null); // "produccion" | "anotaciones" | "paridera" | "tratamiento" | "inseminacion" | "ecografia" | null
   const [pendingAction, setPendingAction] = useState(null); // { type, description, execute }
   const [ecoOptions, setEcoOptions] = useState({ paridera_id: null, lote: null, ronda: null });
+  const [selectedParideraId, setSelectedParideraId] = useState(null); // paridera_id for tratamiento/inseminacion/anotaciones/paridera
   const fileRef = useRef(null);
   const dataCtx = buildDataContext(data);
 
@@ -2462,6 +2463,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
           texto: texto,
           tipo: cabra ? "individual" : "rebaño",
           autor: "Veterinario (CSV)",
+          paridera_id: selectedParideraId || null,
         }]);
 
         if (error) { errors++; errorList.push(`${crotal}: ${error.message}`); }
@@ -2627,7 +2629,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
         const notas = notasCol >= 0 ? row[notasCol]?.trim() || "" : "";
 
         const { error } = await supabase.from("tratamiento").insert([{
-          cabra_id: cabra.id, fecha, tipo, producto, notas: notas || "CSV import",
+          cabra_id: cabra.id, fecha, tipo, producto, notas: notas || "CSV import", paridera_id: selectedParideraId || null,
         }]);
         if (error) { errors++; errorList.push(`${crotal}: ${error.message}`); }
         else imported++;
@@ -2857,6 +2859,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
     setImportResult(null);
     setCsvType(null);
     setEcoOptions({ paridera_id: null, lote: null, ronda: null });
+    setSelectedParideraId(null);
     try {
       const text = await readFileText(file);
       const rows = parseCSV(text);
@@ -3071,6 +3074,18 @@ function ImportadorPage({ data, refresh, saveChat }) {
               </button>
             </div>
 
+            {/* Paridera selector for tratamiento/inseminacion/anotaciones/paridera */}
+            {csvType && csvType !== "produccion" && csvType !== "ecografia" && (
+              <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 12, border: "1px solid #E2E8F0" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", marginBottom: 6 }}>Vincular a paridera</div>
+                <select value={selectedParideraId || ""} onChange={function(e) { setSelectedParideraId(parseInt(e.target.value) || null); }}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #CBD5E1", fontSize: 13, background: "#FFF", cursor: "pointer" }}>
+                  <option value="">General (sin paridera)</option>
+                  {data.parideras.map(function(p) { return <option key={p.id} value={p.id}>{p.nombre}</option>; })}
+                </select>
+              </div>
+            )}
+
             {/* Eco options panel */}
             {csvType === "ecografia" && (
               <div style={{ marginTop: 12, padding: 16, background: "#F0FDFA", borderRadius: 12, border: "1px solid #99F6E4", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -3134,7 +3149,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
               background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
             }}>
-            {importing ? "Importando..." : csvType === "produccion" ? ("🚀 Importar " + (rawRows.length - 1) + " cabras a Supabase") : csvType === "ecografia" ? ("🔬 Importar " + rawRows.length + " ecografias a Supabase") : ("📋 Importar " + (rawRows.length - 1) + " registros a Supabase")}
+            {importing ? "Importando..." : "Importar " + rawRows.length + " registros a Supabase"}
           </button>
         )}
 

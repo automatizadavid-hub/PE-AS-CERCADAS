@@ -1730,7 +1730,7 @@ function DashboardPage({ data }) {
           <span>Parideras</span>
           <span style={{ fontSize: 12, fontWeight: 500, color: "#64748B", marginLeft: 4 }}>({parideraData.length})</span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 20 }}>
           {parideraData.map((p, idx) => {
             const isExpanded = expandedParidera === p.id;
             const phaseColor = p.progreso >= 80 ? "#059669" : p.progreso >= 40 ? "#7C3AED" : "#E8950A";
@@ -1739,45 +1739,45 @@ function DashboardPage({ data }) {
             const pName = (p.nombre || "").toLowerCase();
             const borderColor = pName.includes("febrero") || pName.includes("enero") ? "#3B82F6" : pName.includes("mayo") || pName.includes("abril") ? "#059669" : pName.includes("julio") ? "#E8950A" : pName.includes("octubre") ? "#EC4899" : "#94A3B8";
             return (
-              <div key={p.id} style={{ ...cardStyle, border: "2px solid " + borderColor, transition: "all 0.2s ease" }}>
+              <div key={p.id} style={{ ...cardStyle, border: "2px solid " + borderColor, padding: "28px 30px", transition: "all 0.2s ease" }}>
                 {/* Header */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                   <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1E293B", fontFamily: "'Outfit', sans-serif" }}>{p.nombre}</div>
-                    <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "#1E293B", fontFamily: "'Outfit', sans-serif" }}>{p.nombre}</div>
+                    <div style={{ fontSize: 14, color: "#64748B", marginTop: 4 }}>
                       Machos: {p.fechaMachosStr}
-                      {p.fechaPartosStr !== "-" && <span style={{ marginLeft: 12 }}>Partos est.: {p.fechaPartosStr}</span>}
+                      {p.fechaPartosStr !== "-" && <span style={{ marginLeft: 16 }}>Partos est.: {p.fechaPartosStr}</span>}
                     </div>
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: `${phaseColor}12`, color: phaseColor }}>{phaseLabel}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, padding: "5px 14px", borderRadius: 8, background: `${phaseColor}12`, color: phaseColor }}>{phaseLabel}</span>
                 </div>
 
                 {/* Progress bar */}
-                <div style={{ height: 4, background: "#F3F4F6", borderRadius: 2, overflow: "hidden", marginBottom: 14 }}>
-                  <div style={{ height: "100%", borderRadius: 2, background: phaseColor, width: `${p.progreso}%`, transition: "width 1.5s ease" }} />
+                <div style={{ height: 6, background: "#F3F4F6", borderRadius: 3, overflow: "hidden", marginBottom: 20 }}>
+                  <div style={{ height: "100%", borderRadius: 3, background: borderColor, width: `${p.progreso}%`, transition: "width 1.5s ease" }} />
                 </div>
 
                 {/* Stats row */}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                  <div style={statBoxStyle} onClick={() => { if (p.partosCount > 0) setModal(`partos_paridera_${p.id}`); }} title="Partos">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#059669", fontFamily: "'Space Mono', monospace", cursor: p.partosCount > 0 ? "pointer" : "default" }}>{p.partosCount}</span>
-                    <span style={{ fontSize: 10, color: "#64748B" }}>Partos</span>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 16 }}>
+                  <div style={{ ...statBoxStyle, padding: "14px 8px" }} onClick={() => { if (p.partosCount > 0) setModal(`partos_paridera_${p.id}`); }}>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "'Space Mono', monospace", cursor: p.partosCount > 0 ? "pointer" : "default" }}>{p.partosCount}</span>
+                    <span style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>Partos</span>
                   </div>
-                  <div style={statBoxStyle} onClick={() => { if (p.ecosCount > 0) setModal(`eco_paridera_${p.id}`); }} title="Ecografias">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#7C3AED", fontFamily: "'Space Mono', monospace", cursor: p.ecosCount > 0 ? "pointer" : "default" }}>{p.ecosCount}</span>
-                    <span style={{ fontSize: 10, color: "#64748B" }}>Ecos</span>
+                  <div style={{ ...statBoxStyle, padding: "14px 8px" }} onClick={() => { if (p.ecosCount > 0) setModal(`eco_paridera_${p.id}`); }}>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: "#7C3AED", fontFamily: "'Space Mono', monospace", cursor: p.ecosCount > 0 ? "pointer" : "default" }}>{p.ecosCount}</span>
+                    <span style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>Ecografias</span>
                   </div>
-                  <div style={statBoxStyle} onClick={() => { if (p.cubsCount > 0) setModal(`cubs_paridera_${p.id}`); }} title="Cubriciones">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace", cursor: p.cubsCount > 0 ? "pointer" : "default" }}>{p.cubsCount}</span>
-                    <span style={{ fontSize: 10, color: "#64748B" }}>Cubr.</span>
+                  <div style={{ ...statBoxStyle, padding: "14px 8px" }} onClick={() => { if (p.cubsCount > 0) setModal(`cubs_paridera_${p.id}`); }}>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace", cursor: p.cubsCount > 0 ? "pointer" : "default" }}>{p.cubsCount}</span>
+                    <span style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>Cubriciones</span>
                   </div>
-                  <div style={statBoxStyle} onClick={() => { if (p.criasCount > 0) setModal(`crias_paridera_${p.id}`); }} title="Crias">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#0891B2", fontFamily: "'Space Mono', monospace", cursor: p.criasCount > 0 ? "pointer" : "default" }}>{p.criasCount}</span>
-                    <span style={{ fontSize: 10, color: "#64748B" }}>Crias</span>
+                  <div style={{ ...statBoxStyle, padding: "14px 8px" }} onClick={() => { if (p.criasCount > 0) setModal(`crias_paridera_${p.id}`); }}>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: "#0891B2", fontFamily: "'Space Mono', monospace", cursor: p.criasCount > 0 ? "pointer" : "default" }}>{p.criasCount}</span>
+                    <span style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>Crias</span>
                   </div>
-                  <div style={statBoxStyle} onClick={() => { if (p.tratsCount > 0) setModal(`trat_paridera_${p.id}`); }} title="Tratamientos">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace", cursor: p.tratsCount > 0 ? "pointer" : "default" }}>{p.tratsCount}</span>
-                    <span style={{ fontSize: 10, color: "#64748B" }}>Trats.</span>
+                  <div style={{ ...statBoxStyle, padding: "14px 8px" }} onClick={() => { if (p.tratsCount > 0) setModal(`trat_paridera_${p.id}`); }}>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace", cursor: p.tratsCount > 0 ? "pointer" : "default" }}>{p.tratsCount}</span>
+                    <span style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>Tratamientos</span>
                   </div>
                 </div>
 

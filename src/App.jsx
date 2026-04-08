@@ -1735,8 +1735,11 @@ function DashboardPage({ data }) {
             const isExpanded = expandedParidera === p.id;
             const phaseColor = p.progreso >= 80 ? "#059669" : p.progreso >= 40 ? "#7C3AED" : "#E8950A";
             const phaseLabel = p.progreso >= 80 ? "Partos" : p.progreso >= 40 ? "Gestacion" : "Cubricion";
+            // Fixed border color per paridera name
+            const pName = (p.nombre || "").toLowerCase();
+            const borderColor = pName.includes("febrero") || pName.includes("enero") ? "#3B82F6" : pName.includes("mayo") || pName.includes("abril") ? "#059669" : pName.includes("julio") ? "#E8950A" : pName.includes("octubre") ? "#EC4899" : "#94A3B8";
             return (
-              <div key={p.id} style={{ ...cardStyle, borderLeft: `4px solid ${phaseColor}`, transition: "all 0.2s ease" }}>
+              <div key={p.id} style={{ ...cardStyle, border: "2px solid " + borderColor, transition: "all 0.2s ease" }}>
                 {/* Header */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                   <div>

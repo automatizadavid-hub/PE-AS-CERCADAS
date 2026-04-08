@@ -59,16 +59,32 @@ function buildDataContext(data) {
   lines.push(`Parideras: ${data.parideras.map(p => p.nombre).join(", ")}`);
   lines.push(`Reglas activas: ${data.reglas.length}`);
   
-  // Production data — multi-day summary
+  // Production data — using promedio_10d (10-day average) as the reference metric, NOT daily litros
   const prod = data.produccion || [];
   const allDates = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
   if (allDates.length > 0) {
-    lines.push(`\nDías de producción importados: ${allDates.length} (${allDates[allDates.length - 1]} a ${allDates[0]})`);
+    lines.push(`\nDias de produccion importados: ${allDates.length} (${allDates[allDates.length - 1]} a ${allDates[0]})`);
+    lines.push(`IMPORTANTE: La produccion de referencia es el PROMEDIO 10 DIAS (p10d), NO la produccion de un solo dia. La produccion diaria fluctua mucho y no es fiable.`);
     allDates.slice(0, 5).forEach(fecha => {
       const dayProd = prod.filter(p => p.fecha === fecha);
-      const totalL = dayProd.reduce((s, p) => s + (p.litros || 0), 0);
-      lines.push(`  ${fecha}: ${dayProd.length} cabras, ${totalL.toFixed(1)}L total, ${(totalL / dayProd.length).toFixed(2)}L/cabra`);
+      const totalProm = dayProd.reduce((s, p) => s + (p.promedio_10d || p.media_10d || p.litros || 0), 0);
+      lines.push(`  ${fecha}: ${dayProd.length} cabras, promedio10d total: ${totalProm.toFixed(1)}L, media: ${(totalProm / dayProd.length).toFixed(2)}L/cabra`);
     });
+    // Send individual cabra production with promedio_10d for the latest date
+    const latestDate = allDates[0];
+    const latestProd = prod.filter(p => p.fecha === latestDate);
+    if (latestProd.length > 0) {
+      lines.push(`\nProduccion por cabra (promedio 10d, fecha ${latestDate}):`);
+      latestProd.sort((a, b) => (b.promedio_10d || b.media_10d || b.litros || 0) - (a.promedio_10d || a.media_10d || a.litros || 0));
+      latestProd.forEach(p => {
+        const cabra = data.cabras.find(c => c.id === p.cabra_id);
+        const prom10d = p.promedio_10d || p.media_10d || 0;
+        const lote = cabra?.lote?.nombre || "Sin lote";
+        if (cabra && prom10d > 0) {
+          lines.push(`  ${cabra.crotal} ${lote} DEL=${p.dia_lactacion || 0} p10d=${prom10d.toFixed(2)}L cond=${(p.conductividad || 0).toFixed(1)}`);
+        }
+      });
+    }
   }
   
   // Double vacías
@@ -294,16 +310,22 @@ function analizarTendencias(data) {
     const penultimo = ultimos7.length >= 2 ? ultimos7[ultimos7.length - 2] : null;
     const antepenultimo = ultimos7.length >= 3 ? ultimos7[ultimos7.length - 3] : null;
 
-    // Caida brusca: >25% en un dia, con produccion previa >0.5L
-    if (penultimo && penultimo.litros > 0.5 && ultimo.litros > 0) {
-      const cambio = ((ultimo.litros - penultimo.litros) / penultimo.litros) * 100;
+    // Use promedio_10d (10-day avg) as reference, fallback to litros
+    const getP10d = (r) => r.promedio_10d || r.media_10d || r.litros || 0;
+    const uP = getP10d(ultimo);
+    const pP = penultimo ? getP10d(penultimo) : 0;
+    const aP = antepenultimo ? getP10d(antepenultimo) : 0;
+
+    // Caida brusca: >25% change in promedio_10d, with previous >0.5L
+    if (penultimo && pP > 0.5 && uP > 0) {
+      const cambio = ((uP - pP) / pP) * 100;
       if (cambio < -25) {
         const condAlta = ultimo.conductividad > 6.0;
         tendencias.push({
           tipo: condAlta ? "MASTITIS_PROBABLE" : "CAIDA_BRUSCA",
           crotal: cabra.crotal,
           lote: lote?.nombre || "Sin lote",
-          detalle: `${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (${cambio.toFixed(0)}%)`,
+          detalle: `p10d: ${pP.toFixed(1)}L -> ${uP.toFixed(1)}L (${cambio.toFixed(0)}%)`,
           conductividad: ultimo.conductividad,
           severidad: condAlta ? "alta" : "media",
           fechas: `${penultimo.fecha} -> ${ultimo.fecha}`,
@@ -311,17 +333,17 @@ function analizarTendencias(data) {
       }
     }
 
-    // Declive progresivo: caida >15% en ultimos 3 registros
-    if (antepenultimo && antepenultimo.litros > 0.5) {
-      const cambio3d = ((ultimo.litros - antepenultimo.litros) / antepenultimo.litros) * 100;
-      if (cambio3d < -15 && ultimo.litros < penultimo.litros && penultimo.litros < antepenultimo.litros) {
+    // Declive progresivo: caida >15% in last 3 promedio_10d
+    if (antepenultimo && aP > 0.5) {
+      const cambio3d = ((uP - aP) / aP) * 100;
+      if (cambio3d < -15 && uP < pP && pP < aP) {
         const yaDetectada = tendencias.some(t => t.crotal === cabra.crotal && (t.tipo === "CAIDA_BRUSCA" || t.tipo === "MASTITIS_PROBABLE"));
         if (!yaDetectada) {
           tendencias.push({
             tipo: "DECLIVE",
             crotal: cabra.crotal,
             lote: lote?.nombre || "Sin lote",
-            detalle: `${antepenultimo.litros.toFixed(1)}L -> ${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (${cambio3d.toFixed(0)}% en 3 dias)`,
+            detalle: `p10d: ${aP.toFixed(1)}L -> ${pP.toFixed(1)}L -> ${uP.toFixed(1)}L (${cambio3d.toFixed(0)}% en 3 dias)`,
             conductividad: ultimo.conductividad,
             severidad: "media",
             fechas: `${antepenultimo.fecha} -> ${ultimo.fecha}`,
@@ -330,9 +352,9 @@ function analizarTendencias(data) {
       }
     }
 
-    // Subida post-tratamiento: >30% subida + tratamiento en ultimos 7 dias
-    if (penultimo && penultimo.litros > 0.3) {
-      const subida = ((ultimo.litros - penultimo.litros) / penultimo.litros) * 100;
+    // Subida post-tratamiento: >30% rise in promedio_10d + treatment in last 7 days
+    if (penultimo && pP > 0.3) {
+      const subida = ((uP - pP) / pP) * 100;
       if (subida > 30) {
         const tratReciente = (data.tratamientos || []).find(t =>
           t.cabra_id === parseInt(cabraId) &&
@@ -343,7 +365,7 @@ function analizarTendencias(data) {
             tipo: "RESPUESTA_TRATAMIENTO",
             crotal: cabra.crotal,
             lote: lote?.nombre || "Sin lote",
-            detalle: `${penultimo.litros.toFixed(1)}L -> ${ultimo.litros.toFixed(1)}L (+${subida.toFixed(0)}%) tras ${tratReciente.tipo}: ${tratReciente.producto || "s/n"}`,
+            detalle: `p10d: ${pP.toFixed(1)}L -> ${uP.toFixed(1)}L (+${subida.toFixed(0)}%) tras ${tratReciente.tipo}: ${tratReciente.producto || "s/n"}`,
             conductividad: ultimo.conductividad,
             severidad: "info",
             fechas: `${penultimo.fecha} -> ${ultimo.fecha}`,
@@ -353,13 +375,13 @@ function analizarTendencias(data) {
     }
   });
 
-  // Tendencia global del rebano
+  // Tendencia global del rebano (using promedio_10d)
   const resumen = {};
   if (fechas.length >= 2) {
     const dia1 = prod.filter(p => p.fecha === fechas[0]);
     const dia2 = prod.filter(p => p.fecha === fechas[1]);
-    const total1 = dia1.reduce((s, p) => s + (p.litros || 0), 0);
-    const total2 = dia2.reduce((s, p) => s + (p.litros || 0), 0);
+    const total1 = dia1.reduce((s, p) => s + (p.promedio_10d || p.media_10d || p.litros || 0), 0);
+    const total2 = dia2.reduce((s, p) => s + (p.promedio_10d || p.media_10d || p.litros || 0), 0);
     const media1 = dia1.length > 0 ? total1 / dia1.length : 0;
     const media2 = dia2.length > 0 ? total2 / dia2.length : 0;
     resumen.mediaHoy = media1;

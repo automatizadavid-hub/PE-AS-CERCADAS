@@ -64,7 +64,7 @@ function buildDataContext(data) {
   const allDates = [...new Set(prod.map(p => p.fecha))].sort((a, b) => b.localeCompare(a));
   if (allDates.length > 0) {
     lines.push(`\nDias de produccion importados: ${allDates.length} (${allDates[allDates.length - 1]} a ${allDates[0]})`);
-    lines.push(`IMPORTANTE: La produccion de referencia es el PROMEDIO 10 DIAS (p10d), NO la produccion de un solo dia. La produccion diaria fluctua mucho y no es fiable.`);
+    lines.push(`IMPORTANTE: El campo p10d (promedio 10 dias) viene PRECALCULADO por el software de ordeno. NO necesitas calcularlo tu. Es el dato de produccion MAS FIABLE. SIEMPRE usa p10d como indicador de produccion, NUNCA la produccion diaria (litros) que fluctua mucho. Cuando hables de produccion de una cabra, SIEMPRE di el p10d.`);
     allDates.slice(0, 5).forEach(fecha => {
       const dayProd = prod.filter(p => p.fecha === fecha);
       const totalProm = dayProd.reduce((s, p) => s + (p.promedio_10d || p.media_10d || p.litros || 0), 0);

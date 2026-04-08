@@ -814,7 +814,7 @@ function LoginPage({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F5F7FA", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Outfit', sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#F5F3EF", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Outfit', sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap');`}</style>
       <div style={{ background: "#FFF", borderRadius: 24, padding: "48px 40px", width: 400, boxShadow: "0 8px 40px rgba(0,0,0,0.08)", textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: 18, background: "linear-gradient(135deg, #E8950A, #CA8106)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 20px" }}>🐐</div>
@@ -915,27 +915,26 @@ function useSupabaseData() {
 // SHARED COMPONENTS (same as before)
 // ==========================================
 function Badge({ text, color }) {
-  return <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: `${color}14`, color, fontWeight: 600 }}>{text}</span>;
+  return <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, background: `${color}10`, color, fontWeight: 600 }}>{text}</span>;
 }
 function Card({ children, style = {} }) {
-  return <div style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 16, padding: 22, boxShadow: "0 1px 4px rgba(0,0,0,0.03)", ...style }}>{children}</div>;
+  return <div style={{ background: "#FFF", border: "none", borderRadius: 16, padding: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)", ...style }}>{children}</div>;
 }
-function SectionTitle({ icon, text, color = "#1E293B" }) {
-  return <div style={{ fontSize: 15, fontWeight: 700, color, marginBottom: 16, fontFamily: "'Outfit', sans-serif", display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>{icon}</span>{text}</div>;
+function SectionTitle({ icon, text, color = "#1A1A1A" }) {
+  return <div style={{ fontSize: 16, fontWeight: 700, color, marginBottom: 16, fontFamily: "'Outfit', sans-serif", display: "flex", alignItems: "center", gap: 8 }}>{icon && <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }}></span>}{text}</div>;
 }
 function KPI({ icon, label, value, sub, accent, onClick }) {
   return (
-    <div style={{ background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 14, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 5, position: "relative", overflow: "hidden", transition: "all .25s", cursor: onClick ? "pointer" : "default", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}
+    <div style={{ background: "#FFF", border: "none", borderRadius: 14, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 6, position: "relative", overflow: "hidden", transition: "all .25s", cursor: onClick ? "pointer" : "default", boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)" }}
       onClick={onClick}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}50`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${accent}15`; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.03)"; }}>
-      <div style={{ position: "absolute", top: -16, right: -12, fontSize: 64, opacity: 0.04 }}>{icon}</div>
+      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.08)"; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)"; }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 11.5, color: "#94A3B8", letterSpacing: ".04em", textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
-        {onClick && <span style={{ fontSize: 13, opacity: 0.3 }}>🔍</span>}
+        <span style={{ fontSize: 12, color: "#8C8C8C", letterSpacing: ".03em", textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
+        {onClick && <span style={{ fontSize: 11, color: "#C0C0C0" }}>Ver</span>}
       </div>
-      <div style={{ fontSize: 30, fontWeight: 700, color: accent, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: "#94A3B8" }}>{sub}</div>}
+      <div style={{ fontSize: 32, fontWeight: 700, color: "#1A1A1A", fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: "#8C8C8C" }}>{sub}</div>}
     </div>
   );
 }
@@ -1456,7 +1455,7 @@ function FormattedMessage({ text }) {
 // ==========================================
 function LoadingScreen() {
   return (
-    <div style={{ minHeight: "100vh", background: "#F5F7FA", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+    <div style={{ minHeight: "100vh", background: "#F5F3EF", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
       <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg, #E8950A, #CA8106)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, animation: "pulse 1.5s infinite" }}>🐐</div>
       <div style={{ fontSize: 14, color: "#94A3B8", fontFamily: "'Outfit', sans-serif" }}>Cargando datos de la granja...</div>
     </div>
@@ -6091,15 +6090,15 @@ function GuardadosPage({ data, refresh }) {
 // MAIN APP
 // ==========================================
 const NAV = [
-  { id: "dashboard", icon: "📊", label: "Dashboard" },
-  { id: "produccion", icon: "🥛", label: "Producción" },
-  { id: "sanidad", icon: "🏥", label: "Sanidad" },
-  { id: "rentabilidad", icon: "💰", label: "Rentabilidad" },
-  { id: "importador", icon: "📁", label: "Importador" },
-  { id: "consultas", icon: "💬", label: "Consultas" },
-  { id: "anomalias", icon: "🔍", label: "Anomalías" },
-  { id: "guardados", icon: "💾", label: "Guardados" },
-  { id: "config", icon: "⚙️", label: "Config" },
+  { id: "dashboard", label: "Dashboard" },
+  { id: "produccion", label: "Produccion" },
+  { id: "sanidad", label: "Sanidad" },
+  { id: "rentabilidad", label: "Rentabilidad" },
+  { id: "importador", label: "Importador" },
+  { id: "consultas", label: "Consultas" },
+  { id: "anomalias", label: "Anomalias" },
+  { id: "guardados", label: "Guardados" },
+  { id: "config", label: "Config" },
 ];
 
 export default function App() {
@@ -6133,7 +6132,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F5F7FA", fontFamily: "'Outfit', sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#F5F3EF", fontFamily: "'Outfit', sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap');
         @keyframes fadeSlideIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
@@ -6147,25 +6146,25 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background:#CBD5E1; border-radius:3px }
       `}</style>
 
-      <div style={{ background: "#FFF", borderBottom: "1px solid #E2E8F0", padding: "0 28px", height: 60, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
+      <div style={{ background: "#FFF", borderBottom: "none", padding: "0 28px", height: 60, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-          <div style={{ width: 35, height: 35, borderRadius: 10, background: "linear-gradient(135deg, #E8950A, #CA8106)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, color: "#FFF" }}>🐐</div>
+          <div style={{ width: 35, height: 35, borderRadius: 10, background: "#E8950A", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#FFF", fontFamily: "'Outfit', sans-serif" }}>PC</div>
           <div>
-            <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: "-.02em" }}><span style={{ color: "#E8950A" }}>PEÑAS</span> <span style={{ color: "#1E293B" }}>CERCADAS</span></div>
-            <div style={{ fontSize: 9, color: "#94A3B8", letterSpacing: ".1em", textTransform: "uppercase" }}>Sistema de Gestión Ganadera</div>
+            <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: "-.02em" }}><span style={{ color: "#E8950A" }}>PEÑAS</span> <span style={{ color: "#1A1A1A" }}>CERCADAS</span></div>
+            <div style={{ fontSize: 9, color: "#A0A0A0", letterSpacing: ".1em", textTransform: "uppercase" }}>Sistema de Gestion Ganadera</div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 2 }}>
           {NAV.map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
-              background: page === item.id ? "#FEF9EE" : "transparent",
-              border: page === item.id ? "1px solid #FDE68A" : "1px solid transparent",
-              borderRadius: 9, padding: "6px 14px", color: page === item.id ? "#E8950A" : "#64748B",
-              fontSize: 12.5, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "'Outfit', sans-serif",
+              background: page === item.id ? "#FFF8EE" : "transparent",
+              border: "none",
+              borderRadius: 8, padding: "7px 14px", color: page === item.id ? "#1A1A1A" : "#999",
+              fontSize: 13, fontWeight: page === item.id ? 700 : 500, cursor: "pointer", fontFamily: "'Outfit', sans-serif",
             }}
-              onMouseEnter={e => { if (page !== item.id) e.currentTarget.style.color = "#1E293B"; }}
-              onMouseLeave={e => { if (page !== item.id) e.currentTarget.style.color = "#64748B"; }}
-            ><span style={{ fontSize: 14 }}>{item.icon}</span>{item.label}</button>
+              onMouseEnter={e => { if (page !== item.id) e.currentTarget.style.color = "#1A1A1A"; }}
+              onMouseLeave={e => { if (page !== item.id) e.currentTarget.style.color = "#999"; }}
+            >{item.label}</button>
           ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

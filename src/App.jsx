@@ -1470,7 +1470,7 @@ function DashboardPage({ data }) {
   const [modal, setModal] = useState(null);
   const [cabraHistorial, setCabraHistorial] = useState(null);
   const [searchCrotal, setSearchCrotal] = useState("");
-  const LOTE_COLORS = { "Lote 1": "#E8950A", "Lote 2": "#DB2777", "Lote 3": "#7C3AED", "Lote 4": "#DC2626", "Lote 5": "#0891B2", "Lote 6": "#EA580C", "Lote 13": "#059669" };
+  const [expandedParidera, setExpandedParidera] = useState(null);
 
   // Search suggestions
   const searchResults = searchCrotal.length >= 3 ? data.cabras.filter(c => c.crotal.includes(searchCrotal)).slice(0, 8) : [];
@@ -1500,6 +1500,7 @@ function DashboardPage({ data }) {
     fecha: t.fecha ? new Date(t.fecha).toLocaleDateString("es-ES") : "-",
     tipo: t.tipo || "-",
     producto: t.producto || "-",
+    paridera_id: t.paridera_id || null,
   }));
   const cubsModal = data.cubriciones.map(c => ({
     crotal: c.cabra?.crotal || "-",
@@ -1517,27 +1518,25 @@ function DashboardPage({ data }) {
 
   // Alertas from real data
   const alertas = [];
-  // Check double vacías
   const vaciasByC = {};
   data.ecografias.filter(e => e.resultado === "vacia").forEach(e => {
     const cr = e.cabra?.crotal;
     if (cr) vaciasByC[cr] = (vaciasByC[cr] || 0) + 1;
   });
   const dobleVacias = Object.entries(vaciasByC).filter(([, c]) => c >= 2).map(([cr]) => cr);
-  if (dobleVacias.length > 0) alertas.push({ tipo: "alta", msg: `${dobleVacias.length} cabras vacías en dos o más ecografías`, detalle: dobleVacias.join(", "), icon: "🔴" });
+  if (dobleVacias.length > 0) alertas.push({ tipo: "alta", msg: `${dobleVacias.length} cabras vacias en dos o mas ecografias`, detalle: dobleVacias.join(", ") });
 
-  // More alerts based on farm knowledge
   const cabrasLote3 = data.cabras.filter(c => c.lote_id && data.lotes.find(l => l.id === c.lote_id && l.nombre.includes("Lote 3")));
-  if (cabrasLote3.length > 0) alertas.push({ tipo: "alta", msg: `Paridera Mayo: vacunar enterotoxemias`, detalle: `${cabrasLote3.length} cabras del Lote 3 necesitan Polibascol antes del parto`, icon: "💉" });
-  if (cabrasLote3.length > 0) alertas.push({ tipo: "alta", msg: `Paridera Mayo: desparasitación pendiente`, detalle: `${cabrasLote3.length} cabras del Lote 3 necesitan desparasitación`, icon: "💊" });
+  if (cabrasLote3.length > 0) alertas.push({ tipo: "alta", msg: `Paridera Mayo: vacunar enterotoxemias`, detalle: `${cabrasLote3.length} cabras del Lote 3 necesitan Polibascol antes del parto` });
+  if (cabrasLote3.length > 0) alertas.push({ tipo: "alta", msg: `Paridera Mayo: desparasitacion pendiente`, detalle: `${cabrasLote3.length} cabras del Lote 3 necesitan desparasitacion` });
 
   const cabrasLote6 = data.cabras.filter(c => c.lote_id && data.lotes.find(l => l.id === c.lote_id && l.nombre.includes("Lote 6")));
-  if (cabrasLote6.length > 0) alertas.push({ tipo: "media", msg: `${cabrasLote6.length} cabras en Lote 6 con machos`, detalle: "Machos entraron el 20 de febrero, retirar el 20 de marzo", icon: "📅" });
+  if (cabrasLote6.length > 0) alertas.push({ tipo: "media", msg: `${cabrasLote6.length} cabras en Lote 6 con machos`, detalle: "Machos entraron el 20 de febrero, retirar el 20 de marzo" });
 
-  if (data.crias.length > 0) alertas.push({ tipo: "media", msg: `${data.crias.length} crías: programar coccidiosis pre-destete`, detalle: "Crías de la paridera de febrero, destete próximamente", icon: "🐐" });
+  if (data.crias.length > 0) alertas.push({ tipo: "media", msg: `${data.crias.length} crias: programar coccidiosis pre-destete`, detalle: "Crias de la paridera de febrero, destete proximamente" });
 
   const inseminaciones = data.cubriciones.filter(c => c.metodo === "inseminacion");
-  if (inseminaciones.length > 0) alertas.push({ tipo: "info", msg: `${inseminaciones.length} inseminaciones pendientes de seguimiento`, detalle: "Verificar resultados en próxima ecografía", icon: "📋" });
+  if (inseminaciones.length > 0) alertas.push({ tipo: "info", msg: `${inseminaciones.length} inseminaciones pendientes de seguimiento`, detalle: "Verificar resultados en proxima ecografia" });
 
   // Calendario from Supabase
   const calendario = (data.eventos || []).filter(e => !e.completado).slice(0, 8).map(e => ({
@@ -1547,8 +1546,8 @@ function DashboardPage({ data }) {
     urgente: e.urgente || false,
   }));
 
-  // Parideras info
-  const parideraCards = data.parideras.map(p => {
+  // Paridera enrichment: count linked records per paridera
+  const parideraData = data.parideras.map(p => {
     const now = new Date();
     const fechaPartos = p.fecha_partos_estimada ? new Date(p.fecha_partos_estimada) : null;
     const fechaMachos = new Date(p.fecha_entrada_machos);
@@ -1558,30 +1557,63 @@ function DashboardPage({ data }) {
       const elapsed = now - fechaMachos;
       progreso = Math.min(100, Math.max(0, Math.round(elapsed / total * 100)));
     }
-    const estado = progreso > 80 ? "En curso" : progreso > 40 ? "Gestación" : "Cubrición";
-    const colors = ["#059669", "#7C3AED", "#EA580C", "#E8950A"];
+
+    const partosCount = data.partos.filter(pt => pt.paridera_id === p.id).length;
+    const ecosCount = data.ecografias.filter(e => e.paridera_id === p.id).length;
+    const cubsCount = data.cubriciones.filter(c => c.paridera_id === p.id).length;
+    const tratsCount = data.tratamientos.filter(t => t.paridera_id === p.id).length;
+
+    // Crias linked through partos of this paridera
+    const partoIdsForParidera = data.partos.filter(pt => pt.paridera_id === p.id).map(pt => pt.cabra_id);
+    const criasCount = data.crias.filter(c => {
+      const madre = data.cabras.find(cb => cb.crotal === c.madre?.crotal);
+      if (!madre) return false;
+      return partoIdsForParidera.includes(madre.id);
+    }).length;
+
+    // Eco results summary
+    const ecosForParidera = data.ecografias.filter(e => e.paridera_id === p.id);
+    const gestantes = ecosForParidera.filter(e => e.resultado === "gestante" || e.resultado === "prenada").length;
+    const vacias = ecosForParidera.filter(e => e.resultado === "vacia").length;
+
+    // Parto types summary
+    const partosForParidera = data.partos.filter(pt => pt.paridera_id === p.id);
+    const partosNormales = partosForParidera.filter(pt => pt.tipo === "normal").length;
+    const abortos = partosForParidera.filter(pt => pt.tipo === "aborto").length;
+    const totalCrias = partosForParidera.reduce((sum, pt) => sum + (pt.num_crias || 0), 0);
+
     return {
-      nombre: p.nombre,
-      machos: fechaMachos.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" }),
-      partos: fechaPartos ? fechaPartos.toLocaleDateString("es-ES", { month: "short", year: "numeric" }) : "-",
-      estado, progreso,
-      color: colors[data.parideras.indexOf(p) % colors.length],
+      ...p,
+      fechaMachosStr: fechaMachos.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" }),
+      fechaPartosStr: fechaPartos ? fechaPartos.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" }) : "-",
+      progreso,
+      partosCount, ecosCount, cubsCount, tratsCount, criasCount,
+      gestantes, vacias, partosNormales, abortos, totalCrias,
     };
+  }).sort((a, b) => new Date(b.fecha_entrada_machos) - new Date(a.fecha_entrada_machos));
+
+  // Tratamientos generales (not linked to any paridera)
+  const tratsGenerales = data.tratamientos.filter(t => !t.paridera_id);
+  const tratsGeneralesByTipo = {};
+  tratsGenerales.forEach(t => {
+    const tipo = t.tipo || "general";
+    tratsGeneralesByTipo[tipo] = (tratsGeneralesByTipo[tipo] || 0) + 1;
   });
 
+  // Column definitions
   const partoCols = [
     { key: "crotal", label: "Crotal", mono: true, bold: true },
     { key: "fecha", label: "Fecha", mono: true },
-    { key: "crias", label: "Crías" },
-    { key: "machos", label: "♂" },
-    { key: "hembras", label: "♀" },
-    { key: "tipo", label: "Tipo", render: v => <Badge text={v} color={v === "normal" ? "#059669" : v === "aborto" ? "#DC2626" : "#94A3B8"} /> },
+    { key: "crias", label: "Crias" },
+    { key: "machos", label: "M" },
+    { key: "hembras", label: "H" },
+    { key: "tipo", label: "Tipo", render: v => <Badge text={v} color={v === "normal" ? "#047857" : v === "aborto" ? "#B91C1C" : "#6B7280"} /> },
     { key: "paridera", label: "Paridera" },
   ];
   const ecoCols = [
     { key: "crotal", label: "Crotal", mono: true, bold: true },
     { key: "fecha", label: "Fecha", mono: true },
-    { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : "#059669"} /> },
+    { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#B91C1C" : "#047857"} /> },
     { key: "paridera", label: "Paridera" },
   ];
   const tratCols = [
@@ -1593,7 +1625,7 @@ function DashboardPage({ data }) {
   const cubCols = [
     { key: "crotal", label: "Crotal", mono: true, bold: true },
     { key: "fecha", label: "Fecha", mono: true },
-    { key: "metodo", label: "Método", render: v => <Badge text={v} color={v === "inseminacion" ? "#7C3AED" : "#EA580C"} /> },
+    { key: "metodo", label: "Metodo", render: v => <Badge text={v} color={v === "inseminacion" ? "#6D28D9" : "#B8860B"} /> },
     { key: "macho", label: "Macho" },
     { key: "paridera", label: "Paridera" },
   ];
@@ -1601,52 +1633,236 @@ function DashboardPage({ data }) {
     { key: "peseta", label: "Peseta", mono: true, bold: true },
     { key: "madre", label: "Madre", mono: true },
     { key: "fecha", label: "Nacimiento", mono: true },
-    { key: "sexo", label: "Sexo", render: v => <Badge text={v} color="#DB2777" /> },
+    { key: "sexo", label: "Sexo", render: v => <Badge text={v} color="#6D28D9" /> },
   ];
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-        <KPI icon="🐐" label="Cabras" value={totalCabras} sub={`en ${lotesSorted.length} lotes`} accent="#E8950A" onClick={() => setModal("cabras")} />
-        <KPI icon="🍼" label="Partos" value={data.partos.length} sub="registrados" accent="#059669" onClick={() => setModal("partos")} />
-        <KPI icon="🔬" label="Ecografías" value={data.ecografias.length} sub={`${dobleVacias.length} doble vacías`} accent="#7C3AED" onClick={() => setModal("eco")} />
-        <KPI icon="💉" label="Tratamientos" value={data.tratamientos.length} sub="registrados" accent="#0891B2" onClick={() => setModal("trat")} />
-        <KPI icon="🐣" label="Crías" value={data.crias.length} sub="hembras con peseta" accent="#DB2777" onClick={() => setModal("crias")} />
-        <KPI icon="🔗" label="Cubriciones" value={data.cubriciones.length} sub={`${data.parideras.length} parideras`} accent="#EA580C" onClick={() => setModal("cubs")} />
-      </div>
+  // Styles
+  const sectionHeaderStyle = {
+    fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "'Outfit', sans-serif",
+    display: "flex", alignItems: "center", gap: 10, marginBottom: 16,
+  };
+  const dotStyle = (color) => ({
+    width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0,
+  });
+  const statBoxStyle = {
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+    padding: "8px 12px", borderRadius: 8, background: "#F9FAFB", minWidth: 60,
+  };
+  const cardStyle = {
+    background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 14,
+    padding: 20, boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+  };
+  const clickableCardStyle = {
+    ...cardStyle, cursor: "pointer", transition: "all 0.2s ease",
+  };
 
-      {/* Quick goat search */}
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+
+      {/* === SEARCH BAR === */}
       <div style={{ position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ position: "relative", flex: 1, maxWidth: 400 }}>
-            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16 }}>🔍</span>
+          <div style={{ position: "relative", flex: 1, maxWidth: 420 }}>
+            <div style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", width: 16, height: 16 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+              </svg>
+            </div>
             <input value={searchCrotal} onChange={e => setSearchCrotal(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && searchResults.length > 0) { setCabraHistorial(searchResults[0].crotal); setSearchCrotal(""); } }}
               placeholder="Buscar cabra por crotal..."
-              style={{ width: "100%", padding: "12px 16px 12px 42px", borderRadius: 12, border: "2px solid #E2E8F0", fontSize: 14, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box", fontFamily: "'Space Mono', monospace" }}
-              onFocus={e => e.target.style.borderColor = "#E8950A"} onBlur={e => { setTimeout(() => setSearchCrotal(""), 200); e.target.style.borderColor = "#E2E8F0"; }} />
+              style={{ width: "100%", padding: "12px 16px 12px 42px", borderRadius: 10, border: "2px solid #E5E7EB", fontSize: 14, color: "#111827", outline: "none", background: "#FFF", boxSizing: "border-box", fontFamily: "'Space Mono', monospace" }}
+              onFocus={e => e.target.style.borderColor = "#1D4ED8"} onBlur={e => { setTimeout(() => setSearchCrotal(""), 200); e.target.style.borderColor = "#E5E7EB"; }} />
           </div>
-          <div style={{ fontSize: 12, color: "#94A3B8" }}>Escribe mínimo 3 dígitos del crotal</div>
+          <div style={{ fontSize: 12, color: "#6B7280" }}>Minimo 3 digitos del crotal</div>
         </div>
         {searchResults.length > 0 && (
-          <div style={{ position: "absolute", top: "100%", left: 0, width: 400, marginTop: 4, background: "#FFF", border: "1px solid #E2E8F0", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 50, overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: "100%", left: 0, width: 420, marginTop: 4, background: "#FFF", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 50, overflow: "hidden" }}>
             {searchResults.map((c, i) => (
               <div key={i} onClick={() => { setCabraHistorial(c.crotal); setSearchCrotal(""); }}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", cursor: "pointer", borderBottom: "1px solid #F5F7FA" }}
-                onMouseEnter={e => e.currentTarget.style.background = "#FEF9EE"}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", cursor: "pointer", borderBottom: "1px solid #F3F4F6" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div>
-                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#1E293B" }}>{c.crotal}</span>
-                  <span style={{ fontSize: 11, color: "#94A3B8", marginLeft: 8 }}>{c.lote?.nombre || "Sin lote"}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#111827" }}>{c.crotal}</span>
+                  <span style={{ fontSize: 11, color: "#6B7280", marginLeft: 8 }}>{c.lote?.nombre || "Sin lote"}</span>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Badge text={c.estado || "-"} color={c.estado === "lactacion" ? "#059669" : "#94A3B8"} />
-                  {c.num_lactaciones && <span style={{ fontSize: 11, color: "#64748B" }}>L{c.num_lactaciones}</span>}
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <Badge text={c.estado || "-"} color={c.estado === "lactacion" ? "#047857" : c.estado === "gestante" ? "#6D28D9" : "#6B7280"} />
+                  {c.num_lactaciones && <span style={{ fontSize: 11, color: "#6B7280", fontFamily: "'Space Mono', monospace" }}>L{c.num_lactaciones}</span>}
                 </div>
               </div>
             ))}
           </div>
         )}
+      </div>
+
+      {/* === PARIDERA CARDS — MAIN NAVIGATION === */}
+      <div>
+        <div style={sectionHeaderStyle}>
+          <div style={dotStyle("#1D4ED8")} />
+          <span>Parideras</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: "#6B7280", marginLeft: 4 }}>({parideraData.length})</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+          {parideraData.map((p, idx) => {
+            const isExpanded = expandedParidera === p.id;
+            const phaseColor = p.progreso >= 80 ? "#047857" : p.progreso >= 40 ? "#6D28D9" : "#B8860B";
+            const phaseLabel = p.progreso >= 80 ? "Partos" : p.progreso >= 40 ? "Gestacion" : "Cubricion";
+            return (
+              <div key={p.id} style={{ ...cardStyle, borderLeft: `4px solid ${phaseColor}`, transition: "all 0.2s ease" }}>
+                {/* Header */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", fontFamily: "'Outfit', sans-serif" }}>{p.nombre}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                      Machos: {p.fechaMachosStr}
+                      {p.fechaPartosStr !== "-" && <span style={{ marginLeft: 12 }}>Partos est.: {p.fechaPartosStr}</span>}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: `${phaseColor}12`, color: phaseColor }}>{phaseLabel}</span>
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ height: 4, background: "#F3F4F6", borderRadius: 2, overflow: "hidden", marginBottom: 14 }}>
+                  <div style={{ height: "100%", borderRadius: 2, background: phaseColor, width: `${p.progreso}%`, transition: "width 1.5s ease" }} />
+                </div>
+
+                {/* Stats row */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                  <div style={statBoxStyle} onClick={() => { if (p.partosCount > 0) setModal(`partos_paridera_${p.id}`); }} title="Partos">
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#047857", fontFamily: "'Space Mono', monospace", cursor: p.partosCount > 0 ? "pointer" : "default" }}>{p.partosCount}</span>
+                    <span style={{ fontSize: 10, color: "#6B7280" }}>Partos</span>
+                  </div>
+                  <div style={statBoxStyle} onClick={() => { if (p.ecosCount > 0) setModal(`eco_paridera_${p.id}`); }} title="Ecografias">
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#6D28D9", fontFamily: "'Space Mono', monospace", cursor: p.ecosCount > 0 ? "pointer" : "default" }}>{p.ecosCount}</span>
+                    <span style={{ fontSize: 10, color: "#6B7280" }}>Ecos</span>
+                  </div>
+                  <div style={statBoxStyle} onClick={() => { if (p.cubsCount > 0) setModal(`cubs_paridera_${p.id}`); }} title="Cubriciones">
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#B8860B", fontFamily: "'Space Mono', monospace", cursor: p.cubsCount > 0 ? "pointer" : "default" }}>{p.cubsCount}</span>
+                    <span style={{ fontSize: 10, color: "#6B7280" }}>Cubr.</span>
+                  </div>
+                  <div style={statBoxStyle} onClick={() => { if (p.criasCount > 0) setModal(`crias_paridera_${p.id}`); }} title="Crias">
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#0F766E", fontFamily: "'Space Mono', monospace", cursor: p.criasCount > 0 ? "pointer" : "default" }}>{p.criasCount}</span>
+                    <span style={{ fontSize: 10, color: "#6B7280" }}>Crias</span>
+                  </div>
+                  <div style={statBoxStyle} onClick={() => { if (p.tratsCount > 0) setModal(`trat_paridera_${p.id}`); }} title="Tratamientos">
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#1D4ED8", fontFamily: "'Space Mono', monospace", cursor: p.tratsCount > 0 ? "pointer" : "default" }}>{p.tratsCount}</span>
+                    <span style={{ fontSize: 10, color: "#6B7280" }}>Trats.</span>
+                  </div>
+                </div>
+
+                {/* Expand toggle */}
+                <div
+                  onClick={() => setExpandedParidera(isExpanded ? null : p.id)}
+                  style={{ fontSize: 12, color: "#1D4ED8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, userSelect: "none" }}>
+                  <span style={{ transition: "transform 0.2s", display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </span>
+                  {isExpanded ? "Ocultar detalle" : "Ver detalle"}
+                </div>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" }}>
+                    {/* Eco summary */}
+                    {p.ecosCount > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Ecografias</div>
+                        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#111827" }}>
+                          <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#047857", marginRight: 4 }}></span>Gestantes: <strong>{p.gestantes}</strong></span>
+                          <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 4 }}></span>Vacias: <strong>{p.vacias}</strong></span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Partos summary */}
+                    {p.partosCount > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Partos</div>
+                        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#111827" }}>
+                          <span>Normales: <strong>{p.partosNormales}</strong></span>
+                          {p.abortos > 0 && <span style={{ color: "#B91C1C" }}>Abortos: <strong>{p.abortos}</strong></span>}
+                          <span>Crias nacidas: <strong>{p.totalCrias}</strong></span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Progress detail */}
+                    <div style={{ fontSize: 11, color: "#6B7280" }}>
+                      Progreso: <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: phaseColor }}>{p.progreso}%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* === REBANO + TRATAMIENTOS GENERALES (side by side) === */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {/* Cabras (rebano) */}
+        <div style={{ ...clickableCardStyle }}
+          onClick={() => setModal("cabras")}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "#1D4ED8"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(29,78,216,0.08)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
+          <div style={sectionHeaderStyle}>
+            <div style={dotStyle("#B8860B")} />
+            <span>Cabras (rebano)</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
+            <span style={{ fontSize: 32, fontWeight: 800, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{totalCabras}</span>
+            <span style={{ fontSize: 13, color: "#6B7280" }}>en {lotesSorted.length} lotes</span>
+          </div>
+          {/* Lote distribution mini */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {lotesSorted.slice(0, 7).map((l, i) => {
+              const pct = (l.cabras / totalCabras * 100).toFixed(0);
+              const barColors = { "Lote 1": "#B8860B", "Lote 2": "#B91C1C", "Lote 3": "#6D28D9", "Lote 4": "#1D4ED8", "Lote 5": "#0F766E", "Lote 6": "#B8860B", "Lote 13": "#047857" };
+              const color = barColors[l.nombre] || "#6B7280";
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: "#6B7280", minWidth: 55 }}>{l.nombre}</span>
+                  <div style={{ flex: 1, height: 4, background: "#F3F4F6", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 2, background: color, width: `${pct}%` }} />
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "'Space Mono', monospace", minWidth: 30, textAlign: "right" }}>{l.cabras}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Tratamientos Generales */}
+        <div style={{ ...clickableCardStyle }}
+          onClick={() => setModal("trat")}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "#1D4ED8"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(29,78,216,0.08)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
+          <div style={sectionHeaderStyle}>
+            <div style={dotStyle("#1D4ED8")} />
+            <span>Tratamientos Generales</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
+            <span style={{ fontSize: 32, fontWeight: 800, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{tratsGenerales.length}</span>
+            <span style={{ fontSize: 13, color: "#6B7280" }}>sin paridera asignada</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {Object.entries(tratsGeneralesByTipo).sort((a, b) => b[1] - a[1]).map(([tipo, count], i) => {
+              const tipoColors = { vacunacion: "#047857", desparasitacion: "#6D28D9", fertilidad: "#B8860B", antibiotico: "#B91C1C", tratamiento: "#1D4ED8", general: "#6B7280" };
+              const color = tipoColors[tipo] || "#6B7280";
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: "#6B7280", textTransform: "capitalize", flex: 1 }}>{tipo}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{count}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6", fontSize: 12, color: "#6B7280" }}>
+            Total tratamientos (incl. parideras): <span style={{ fontWeight: 700, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{data.tratamientos.length}</span>
+          </div>
+        </div>
       </div>
 
       {/* === INTELIGENCIA DEL DIA === */}
@@ -1669,19 +1885,24 @@ function DashboardPage({ data }) {
         if (!hayAlgo && !tendencias.resumen) return null;
 
         return (
-          <Card>
-            <SectionTitle icon="🧠" text="Inteligencia del Día" color="#7C3AED" />
+          <div style={cardStyle}>
+            <div style={sectionHeaderStyle}>
+              <div style={dotStyle("#6D28D9")} />
+              <span>Inteligencia del Dia</span>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
 
               {/* Tendencia global */}
               {tendencias.resumen && (
-                <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", marginBottom: 8 }}>{"📈"} Tendencia del Rebaño</div>
+                <div style={{ background: "#F5F3FF", border: "1px solid #E9E5FF", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6D28D9", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#6D28D9")} /> Tendencia del Rebano
+                  </div>
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: tendencias.resumen.cambioGlobal >= 0 ? "#059669" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: tendencias.resumen.cambioGlobal >= 0 ? "#047857" : "#B91C1C", fontFamily: "'Space Mono', monospace" }}>
                       {tendencias.resumen.cambioGlobal >= 0 ? "+" : ""}{tendencias.resumen.cambioGlobal.toFixed(1)}%
                     </div>
-                    <div style={{ fontSize: 12, color: "#64748B", lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>
                       Media: {tendencias.resumen.mediaHoy?.toFixed(2)}L/cabra<br />
                       vs {tendencias.resumen.mediaAyer?.toFixed(2)}L dia anterior
                     </div>
@@ -1691,35 +1912,42 @@ function DashboardPage({ data }) {
 
               {/* Alertas criticas */}
               {criticas.length > 0 && (
-                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 8 }}>{"🔴"} Criticas ({criticas.length})</div>
+                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#B91C1C", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#B91C1C")} /> Criticas ({criticas.length})
+                  </div>
                   {criticas.slice(0, 5).map((t, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "4px 0", borderBottom: i < Math.min(criticas.length, 5) - 1 ? "1px solid #FEE2E2" : "none" }}>
-                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
-                      <span style={{ marginLeft: 8, color: "#64748B" }}>{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} — {t.detalle}</span>
+                    <div key={i} style={{ fontSize: 12, color: "#111827", padding: "4px 0", borderBottom: i < Math.min(criticas.length, 5) - 1 ? "1px solid #FEE2E2" : "none" }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#B91C1C" }}>{t.crotal}</span>
+                      <span style={{ marginLeft: 8, color: "#6B7280" }}>{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} -- {t.detalle}</span>
                     </div>
                   ))}
-                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>+ {criticas.length - 5} mas</div>}
+                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 4 }}>+ {criticas.length - 5} mas</div>}
                 </div>
               )}
 
               {/* Reproductivo */}
               {(secadosUrg.length > 0 || ecosPend.length > 0 || partosNR.length > 0) && (
-                <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#EA580C", marginBottom: 8 }}>{"🔄"} Reproductivo</div>
+                <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#B8860B", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#B8860B")} /> Reproductivo
+                  </div>
                   {secadosUrg.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
-                      {"⚠️"} <strong>{secadosUrg.length}</strong> secados urgentes: {secadosUrg.slice(0, 4).map(a => a.crotal).join(", ")}{secadosUrg.length > 4 ? "..." : ""}
+                    <div style={{ fontSize: 12, color: "#111827", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 6 }}></span>
+                      <strong>{secadosUrg.length}</strong> secados urgentes: {secadosUrg.slice(0, 4).map(a => a.crotal).join(", ")}{secadosUrg.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {ecosPend.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
-                      {"🔬"} <strong>{ecosPend.length}</strong> ecografias pendientes: {ecosPend.slice(0, 4).map(a => a.crotal).join(", ")}{ecosPend.length > 4 ? "..." : ""}
+                    <div style={{ fontSize: 12, color: "#111827", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#6D28D9", marginRight: 6 }}></span>
+                      <strong>{ecosPend.length}</strong> ecografias pendientes: {ecosPend.slice(0, 4).map(a => a.crotal).join(", ")}{ecosPend.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {partosNR.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#DC2626", padding: "4px 0" }}>
-                      {"🚨"} <strong>{partosNR.length}</strong> partos sin registrar: {partosNR.slice(0, 4).map(a => a.crotal).join(", ")}{partosNR.length > 4 ? "..." : ""}
+                    <div style={{ fontSize: 12, color: "#B91C1C", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 6 }}></span>
+                      <strong>{partosNR.length}</strong> partos sin registrar: {partosNR.slice(0, 4).map(a => a.crotal).join(", ")}{partosNR.length > 4 ? "..." : ""}
                     </div>
                   )}
                 </div>
@@ -1727,13 +1955,15 @@ function DashboardPage({ data }) {
 
               {/* Proximos eventos */}
               {proxEventos.length > 0 && (
-                <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#2563EB", marginBottom: 8 }}>{"📅"} Proximos Eventos</div>
+                <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#1D4ED8", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#1D4ED8")} /> Proximos Eventos
+                  </div>
                   {proxEventos.map((e, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
+                    <div key={i} style={{ fontSize: 12, color: "#111827", padding: "3px 0" }}>
                       <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 600 }}>{e.crotal}</span>
-                      <span style={{ marginLeft: 8, color: "#64748B" }}>{e.detalle}</span>
-                      <span style={{ marginLeft: 6, fontSize: 10, color: "#2563EB", fontWeight: 600 }}>en {e.diasHasta}d</span>
+                      <span style={{ marginLeft: 8, color: "#6B7280" }}>{e.detalle}</span>
+                      <span style={{ marginLeft: 6, fontSize: 10, color: "#1D4ED8", fontWeight: 600 }}>en {e.diasHasta}d</span>
                     </div>
                   ))}
                 </div>
@@ -1741,16 +1971,20 @@ function DashboardPage({ data }) {
 
               {/* Declives + respuestas tratamiento */}
               {(declives.length > 0 || respuestas.length > 0) && (
-                <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 8 }}>{"📊"} Tendencias Individuales</div>
+                <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#047857", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#047857")} /> Tendencias Individuales
+                  </div>
                   {declives.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
-                      {"📉"} <strong>{declives.length}</strong> cabras en declive: {declives.slice(0, 4).map(t => t.crotal).join(", ")}{declives.length > 4 ? "..." : ""}
+                    <div style={{ fontSize: 12, color: "#111827", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 6 }}></span>
+                      <strong>{declives.length}</strong> cabras en declive: {declives.slice(0, 4).map(t => t.crotal).join(", ")}{declives.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {respuestas.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#059669", padding: "4px 0" }}>
-                      {"✅"} <strong>{respuestas.length}</strong> respondiendo a tratamiento: {respuestas.slice(0, 4).map(t => t.crotal).join(", ")}{respuestas.length > 4 ? "..." : ""}
+                    <div style={{ fontSize: 12, color: "#047857", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#047857", marginRight: 6 }}></span>
+                      <strong>{respuestas.length}</strong> respondiendo a tratamiento: {respuestas.slice(0, 4).map(t => t.crotal).join(", ")}{respuestas.length > 4 ? "..." : ""}
                     </div>
                   )}
                 </div>
@@ -1758,10 +1992,12 @@ function DashboardPage({ data }) {
 
               {/* Tratamientos con baja efectividad */}
               {tratsBajos.length > 0 && (
-                <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#D97706", marginBottom: 8 }}>{"💊"} Tratamientos a Revisar</div>
+                <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#B8860B", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#B8860B")} /> Tratamientos a Revisar
+                  </div>
                   {tratsBajos.map((t, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
+                    <div key={i} style={{ fontSize: 12, color: "#111827", padding: "3px 0" }}>
                       <strong>{t.producto}</strong> ({t.tipo}): {t.tasaEfectividad}% efectividad ({t.efectivo}/{t.total} casos)
                     </div>
                   ))}
@@ -1770,107 +2006,81 @@ function DashboardPage({ data }) {
 
               {/* Ultimo resumen guardado */}
               {ultimoResumen && (
-                <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 11, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 8 }}>{"💾"} Ultima Importacion</div>
-                  <div style={{ fontSize: 12, color: "#64748B" }}>
-                    {new Date(ultimoResumen.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })} — {ultimoResumen.total_cabras} cabras, {ultimoResumen.litros_totales?.toFixed(0)}L totales
+                <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#6B7280")} /> Ultima Importacion
                   </div>
-                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas criticas detectadas</div>}
-                  {ultimoResumen.timeline_alertas > 0 && <div style={{ fontSize: 11, color: "#EA580C", marginTop: 2 }}>{ultimoResumen.timeline_alertas} alertas reproductivas</div>}
+                  <div style={{ fontSize: 12, color: "#6B7280" }}>
+                    {new Date(ultimoResumen.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })} -- {ultimoResumen.total_cabras} cabras, {ultimoResumen.litros_totales?.toFixed(0)}L totales
+                  </div>
+                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas criticas detectadas</div>}
+                  {ultimoResumen.timeline_alertas > 0 && <div style={{ fontSize: 11, color: "#B8860B", marginTop: 2 }}>{ultimoResumen.timeline_alertas} alertas reproductivas</div>}
                 </div>
               )}
             </div>
-          </Card>
+          </div>
         );
       })()}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        <Card>
-          <SectionTitle icon="⚠️" text="Alertas y Advertencias" color="#DC2626" />
-          {alertas.length === 0 && <div style={{ color: "#94A3B8", fontSize: 13, padding: 16, textAlign: "center" }}>Sin alertas activas</div>}
+      {/* === ALERTAS + EVENTOS (side by side) === */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {/* Alertas */}
+        <div style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <div style={dotStyle("#B91C1C")} />
+            <span>Alertas y Advertencias</span>
+          </div>
+          {alertas.length === 0 && <div style={{ color: "#6B7280", fontSize: 13, padding: 16, textAlign: "center" }}>Sin alertas activas</div>}
           {alertas.map((a, i) => {
-            const bg = { alta: "#FEF2F2", media: "#FFFBEB", info: "#EFF6FF" }[a.tipo] || "#F8FAFC";
-            const bd = { alta: "#FECACA", media: "#FDE68A", info: "#BFDBFE" }[a.tipo] || "#E2E8F0";
-            return <div key={i} style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 11, padding: "11px 15px", display: "flex", gap: 11, marginBottom: 8 }}>
-              <span style={{ fontSize: 19 }}>{a.icon}</span>
-              <div><div style={{ fontSize: 13, fontWeight: 600, color: "#1E293B" }}>{a.msg}</div><div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{a.detalle}</div></div>
-            </div>;
+            const bg = { alta: "#FEF2F2", media: "#FFFBEB", info: "#EFF6FF" }[a.tipo] || "#F9FAFB";
+            const bd = { alta: "#FECACA", media: "#FDE68A", info: "#BFDBFE" }[a.tipo] || "#E5E7EB";
+            const dotColor = { alta: "#B91C1C", media: "#B8860B", info: "#1D4ED8" }[a.tipo] || "#6B7280";
+            return (
+              <div key={i} style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 10, padding: "11px 15px", display: "flex", gap: 11, marginBottom: 8, alignItems: "flex-start" }}>
+                <div style={{ ...dotStyle(dotColor), marginTop: 5, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{a.msg}</div>
+                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{a.detalle}</div>
+                </div>
+              </div>
+            );
           })}
-        </Card>
+        </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <Card>
-            <SectionTitle icon="📅" text="Próximos Eventos" color="#0891B2" />
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {calendario.map((c, i) => {
-                const col = { cubricion: "#EA580C", sanidad: "#DC2626", ecografia: "#7C3AED", parto: "#059669", identificacion: "#0891B2" }[c.tipo];
-                return <div key={i} style={{ display: "flex", gap: 11, alignItems: "center", padding: "9px 13px", borderRadius: 9, background: c.urgente ? "#FEF2F2" : "#FAFAFA", border: `1px solid ${c.urgente ? "#FECACA" : "#F1F5F9"}` }}>
-                  <div style={{ width: 3.5, height: 30, borderRadius: 2, background: col, flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}><div style={{ fontSize: 12.5, fontWeight: 600, color: "#1E293B" }}>{c.evento}</div><div style={{ fontSize: 11, color: "#94A3B8" }}>{c.fecha}</div></div>
-                  {c.urgente && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 5, background: "#FEE2E2", color: "#DC2626", fontWeight: 700 }}>URGENTE</span>}
-                </div>;
-              })}
-            </div>
-          </Card>
-          <Card>
-            <SectionTitle icon="📊" text={`Distribución por Lotes (${totalCabras} cabras)`} />
-            {lotesSorted.map((l, i) => {
-              const color = LOTE_COLORS[l.nombre] || "#64748B";
-              return <div key={i} style={{ display: "flex", alignItems: "center", gap: 11, padding: "7px 0" }}>
-                <div style={{ width: 9, height: 9, borderRadius: "50%", background: color }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                    <span style={{ fontSize: 12, color: "#475569" }}>{l.nombre}</span>
-                    <span style={{ fontSize: 12.5, fontWeight: 700, color, fontFamily: "'Space Mono', monospace" }}>{l.cabras}</span>
+        {/* Eventos */}
+        <div style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <div style={dotStyle("#0F766E")} />
+            <span>Proximos Eventos</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {calendario.length === 0 && <div style={{ color: "#6B7280", fontSize: 13, padding: 16, textAlign: "center" }}>Sin eventos pendientes</div>}
+            {calendario.map((c, i) => {
+              const col = { cubricion: "#B8860B", sanidad: "#B91C1C", ecografia: "#6D28D9", parto: "#047857", identificacion: "#0F766E" }[c.tipo] || "#6B7280";
+              return (
+                <div key={i} style={{ display: "flex", gap: 11, alignItems: "center", padding: "9px 13px", borderRadius: 8, background: c.urgente ? "#FEF2F2" : "#F9FAFB", border: `1px solid ${c.urgente ? "#FECACA" : "#F3F4F6"}` }}>
+                  <div style={{ width: 3, height: 28, borderRadius: 2, background: col, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "#111827" }}>{c.evento}</div>
+                    <div style={{ fontSize: 11, color: "#6B7280" }}>{c.fecha}</div>
                   </div>
-                  <div style={{ height: 4.5, background: "#F1F5F9", borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ height: "100%", borderRadius: 3, background: color, width: `${(l.cabras / totalCabras * 100)}%`, transition: "width 1s" }} />
-                  </div>
+                  {c.urgente && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, background: "#FEE2E2", color: "#B91C1C", fontWeight: 700, letterSpacing: "0.05em" }}>URGENTE</span>}
                 </div>
-              </div>;
+              );
             })}
-          </Card>
-          <Card>
-            <SectionTitle icon="📏" text={`Reglas Activas (${data.reglas.length})`} />
-            {(() => {
-              const cats = {};
-              data.reglas.forEach(r => { cats[r.categoria] = (cats[r.categoria] || 0) + 1; });
-              const catColors = { sanidad: "#DC2626", reproduccion: "#7C3AED", produccion: "#059669", identificacion: "#0891B2", muertes: "#94A3B8" };
-              return Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([cat, count], i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F8FAFC" }}>
-                  <span style={{ fontSize: 12.5, color: "#475569", textTransform: "capitalize" }}>{cat}</span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: catColors[cat] || "#E8950A", fontFamily: "'Space Mono', monospace" }}>{count}</span>
-                </div>
-              ));
-            })()}
-          </Card>
+          </div>
         </div>
       </div>
 
-      {parideraCards.length > 0 && <div>
-        <SectionTitle icon="🗓️" text="Estado de Parideras" />
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(parideraCards.length, 3)}, 1fr)`, gap: 14 }}>
-          {parideraCards.map((p, i) => <Card key={i}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 11 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B" }}>{p.nombre}</div>
-              <Badge text={p.estado} color={p.color} />
-            </div>
-            <div style={{ display: "flex", gap: 14, marginBottom: 11, fontSize: 11.5, color: "#64748B" }}>
-              <div>Machos: {p.machos}</div><div>Partos: {p.partos}</div>
-            </div>
-            <div style={{ height: 5, background: "#F1F5F9", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 3, background: p.color, width: `${p.progreso}%`, transition: "width 2s" }} />
-            </div>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, textAlign: "right" }}>{p.progreso}%</div>
-          </Card>)}
-        </div>
-      </div>}
+      {/* ============================== */}
+      {/* ========== MODALS ============ */}
+      {/* ============================== */}
 
+      {/* Cabras modal */}
       {modal === "cabras" && (() => {
-        const cabrasModal = data.cabras.map(c => {
+        const cabrasModalData = data.cabras.map(c => {
           const lote = data.lotes.find(l => l.id === c.lote_id);
           const loteName = lote?.nombre || "Sin lote";
-          const promedio = (c.dias_en_leche && c.dias_en_leche > 0) ? ((c.dias_en_leche * 2.2) / c.dias_en_leche).toFixed(1) : "-";
           return {
             crotal: c.crotal,
             edad: c.edad_meses ? `${Math.round(c.edad_meses)} m` : "-",
@@ -1882,32 +2092,32 @@ function DashboardPage({ data }) {
             __folder: loteName,
           };
         });
-        const cabraFolders = [...new Set(cabrasModal.map(c => c.__folder))].map(f => ({
+        const cabraFolders = [...new Set(cabrasModalData.map(c => c.__folder))].map(f => ({
           name: f,
-          count: cabrasModal.filter(c => c.__folder === f).length,
+          count: cabrasModalData.filter(c => c.__folder === f).length,
         })).sort((a, b) => b.count - a.count);
         const cabraCols = [
           { key: "crotal", label: "Crotal", mono: true, bold: true },
           { key: "edad", label: "Edad", mono: true },
           { key: "lactaciones", label: "Lact.", mono: true },
           { key: "del", label: "DEL", mono: true },
-          { key: "estado", label: "Estado", render: v => <Badge text={v} color={v === "lactacion" ? "#059669" : v === "gestante" ? "#7C3AED" : v === "cubricion" ? "#EA580C" : v === "preparto" ? "#DB2777" : "#94A3B8"} /> },
+          { key: "estado", label: "Estado", render: v => <Badge text={v} color={v === "lactacion" ? "#047857" : v === "gestante" ? "#6D28D9" : v === "cubricion" ? "#B8860B" : v === "preparto" ? "#B91C1C" : "#6B7280"} /> },
           { key: "estado_gine", label: "Est. Gine." },
         ];
-        return <DataModal title="Cabras" icon="🐐" accent="#E8950A" data={cabrasModal} columns={cabraCols} onClose={() => setModal(null)} searchPH="Buscar crotal, estado, lote..." folders={cabraFolders} onRowClick={(r) => setCabraHistorial(r.crotal)} />;
+        return <DataModal title="Cabras" icon="" accent="#B8860B" data={cabrasModalData} columns={cabraCols} onClose={() => setModal(null)} searchPH="Buscar crotal, estado, lote..." folders={cabraFolders} onRowClick={(r) => setCabraHistorial(r.crotal)} />;
       })()}
 
       {cabraHistorial && <CabraHistorialModal crotal={cabraHistorial} data={data} onClose={() => setCabraHistorial(null)} />}
 
+      {/* Global partos modal */}
       {modal === "partos" && (() => {
         const d = partosModal.map(p => ({ ...p, __folder: p.paridera || "Sin paridera" }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Partos" icon="🍼" accent="#059669" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+        return <DataModal title="Partos" icon="" accent="#047857" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
       })()}
 
+      {/* Global eco modal */}
       {modal === "eco" && (() => {
-        // Group ecografias by paridera + ronda
-        // Treat null ronda as "primera" in UI (old records before ronda column existed)
         const d = ecosModal.map(e => {
           const p = e.paridera || "Sin paridera";
           const effectiveRonda = e.ronda || "primera";
@@ -1915,44 +2125,141 @@ function DashboardPage({ data }) {
           return { ...e, __folder: p, __subfolder: rondaLabel };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        // Build subfolders: for each paridera, show available rondas
         const subs = [];
         folders.forEach(f => {
           const rondas = [...new Set(d.filter(r => r.__folder === f.name).map(r => r.__subfolder))].sort();
           rondas.forEach(r => {
-            subs.push({ parent: f.name, name: r, count: d.filter(x => x.__folder === f.name && x.__subfolder === r).length, icon: r.includes("1a") ? "🔬" : r.includes("2a") ? "🔄" : "📁" });
+            subs.push({ parent: f.name, name: r, count: d.filter(x => x.__folder === f.name && x.__subfolder === r).length });
           });
         });
         const ecColsWithRonda = [
           { key: "crotal", label: "Crotal", mono: true, bold: true },
           { key: "fecha", label: "Fecha", mono: true },
-          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : v === "hidrometra" ? "#E8950A" : "#059669"} /> },
+          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#B91C1C" : v === "hidrometra" ? "#B8860B" : "#047857"} /> },
           { key: "paridera", label: "Paridera" },
         ];
-        return <DataModal title="Ecografias" icon="🔬" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={subs} />;
+        return <DataModal title="Ecografias" icon="" accent="#6D28D9" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={subs} />;
       })()}
 
+      {/* Global trat modal */}
       {modal === "trat" && (() => {
         const d = tratsModal.map(t => ({ ...t, __folder: t.tipo || "Sin tipo" }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Tratamientos" icon="💉" accent="#0891B2" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+        return <DataModal title="Tratamientos" icon="" accent="#1D4ED8" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
       })()}
 
+      {/* Global cubs modal */}
       {modal === "cubs" && (() => {
         const d = cubsModal.map(c => ({ ...c, __folder: c.paridera || "Sin paridera" }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Cubriciones" icon="🔗" accent="#EA580C" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal, método..." folders={folders} />;
+        return <DataModal title="Cubriciones" icon="" accent="#B8860B" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal, metodo..." folders={folders} />;
       })()}
 
+      {/* Global crias modal */}
       {modal === "crias" && (() => {
         const d = criasModal.map(c => {
           const parto = data.partos.find(p => data.crias.find(cr => cr.madre?.crotal === c.madre && cr.peseta == c.peseta)?.parto_id === p.id);
-          const parideraName = parto?.paridera?.nombre || "Paridera Febrero 2026";
+          const parideraName = parto?.paridera?.nombre || "Sin paridera";
           return { ...c, __folder: parideraName };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Crías Hembra" icon="🐣" accent="#DB2777" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
+        return <DataModal title="Crias Hembra" icon="" accent="#0F766E" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
       })()}
+
+      {/* === PER-PARIDERA MODALS === */}
+      {/* Partos filtered by paridera */}
+      {typeof modal === "string" && modal.startsWith("partos_paridera_") && (() => {
+        const pid = parseInt(modal.replace("partos_paridera_", ""));
+        const paridera = data.parideras.find(p => p.id === pid);
+        const d = data.partos.filter(p => p.paridera_id === pid).map(p => ({
+          crotal: p.cabra?.crotal || "-",
+          fecha: p.fecha ? new Date(p.fecha).toLocaleDateString("es-ES") : "-",
+          crias: p.num_crias ?? 0,
+          machos: p.num_machos ?? 0,
+          hembras: p.num_hembras ?? 0,
+          tipo: p.tipo || "normal",
+          paridera: paridera?.nombre || "-",
+          __folder: p.tipo || "normal",
+        }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title={`Partos - ${paridera?.nombre || "Paridera"}`} icon="" accent="#047857" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal..." folders={folders} />;
+      })()}
+
+      {/* Ecos filtered by paridera */}
+      {typeof modal === "string" && modal.startsWith("eco_paridera_") && (() => {
+        const pid = parseInt(modal.replace("eco_paridera_", ""));
+        const paridera = data.parideras.find(p => p.id === pid);
+        const d = data.ecografias.filter(e => e.paridera_id === pid).map(e => {
+          const effectiveRonda = e.ronda || "primera";
+          const rondaLabel = effectiveRonda === "segunda" ? "2a Ecografia (repaso)" : "1a Ecografia";
+          return {
+            crotal: e.cabra?.crotal || "-",
+            fecha: e.fecha ? new Date(e.fecha).toLocaleDateString("es-ES") : "-",
+            resultado: e.resultado || "-",
+            paridera: paridera?.nombre || "-",
+            __folder: rondaLabel,
+          };
+        });
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        const ecColsLocal = [
+          { key: "crotal", label: "Crotal", mono: true, bold: true },
+          { key: "fecha", label: "Fecha", mono: true },
+          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#B91C1C" : v === "hidrometra" ? "#B8860B" : "#047857"} /> },
+        ];
+        return <DataModal title={`Ecografias - ${paridera?.nombre || "Paridera"}`} icon="" accent="#6D28D9" data={d} columns={ecColsLocal} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} />;
+      })()}
+
+      {/* Cubs filtered by paridera */}
+      {typeof modal === "string" && modal.startsWith("cubs_paridera_") && (() => {
+        const pid = parseInt(modal.replace("cubs_paridera_", ""));
+        const paridera = data.parideras.find(p => p.id === pid);
+        const d = data.cubriciones.filter(c => c.paridera_id === pid).map(c => ({
+          crotal: c.cabra?.crotal || "-",
+          fecha: c.fecha_entrada ? new Date(c.fecha_entrada).toLocaleDateString("es-ES") : "-",
+          metodo: c.metodo || "-",
+          macho: c.macho?.crotal || "-",
+          paridera: paridera?.nombre || "-",
+          __folder: c.metodo || "Sin metodo",
+        }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title={`Cubriciones - ${paridera?.nombre || "Paridera"}`} icon="" accent="#B8860B" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal..." folders={folders} />;
+      })()}
+
+      {/* Crias filtered by paridera */}
+      {typeof modal === "string" && modal.startsWith("crias_paridera_") && (() => {
+        const pid = parseInt(modal.replace("crias_paridera_", ""));
+        const paridera = data.parideras.find(p => p.id === pid);
+        const partoIdsForParidera = data.partos.filter(pt => pt.paridera_id === pid).map(pt => pt.cabra_id);
+        const d = data.crias.filter(c => {
+          const madre = data.cabras.find(cb => cb.crotal === c.madre?.crotal);
+          if (!madre) return false;
+          return partoIdsForParidera.includes(madre.id);
+        }).map(c => ({
+          peseta: c.peseta ?? "-",
+          madre: c.madre?.crotal || "-",
+          fecha: c.fecha_nacimiento ? new Date(c.fecha_nacimiento).toLocaleDateString("es-ES") : "-",
+          sexo: c.sexo || "-",
+          __folder: c.sexo || "Sin sexo",
+        }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title={`Crias - ${paridera?.nombre || "Paridera"}`} icon="" accent="#0F766E" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
+      })()}
+
+      {/* Trats filtered by paridera */}
+      {typeof modal === "string" && modal.startsWith("trat_paridera_") && (() => {
+        const pid = parseInt(modal.replace("trat_paridera_", ""));
+        const paridera = data.parideras.find(p => p.id === pid);
+        const d = data.tratamientos.filter(t => t.paridera_id === pid).map(t => ({
+          crotal: t.cabra?.crotal || "-",
+          fecha: t.fecha ? new Date(t.fecha).toLocaleDateString("es-ES") : "-",
+          tipo: t.tipo || "-",
+          producto: t.producto || "-",
+          __folder: t.tipo || "Sin tipo",
+        }));
+        const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
+        return <DataModal title={`Tratamientos - ${paridera?.nombre || "Paridera"}`} icon="" accent="#1D4ED8" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+      })()}
+
     </div>
   );
 }

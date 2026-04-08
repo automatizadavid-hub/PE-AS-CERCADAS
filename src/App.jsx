@@ -1607,13 +1607,13 @@ function DashboardPage({ data }) {
     { key: "crias", label: "Crias" },
     { key: "machos", label: "M" },
     { key: "hembras", label: "H" },
-    { key: "tipo", label: "Tipo", render: v => <Badge text={v} color={v === "normal" ? "#047857" : v === "aborto" ? "#B91C1C" : "#6B7280"} /> },
+    { key: "tipo", label: "Tipo", render: v => <Badge text={v} color={v === "normal" ? "#059669" : v === "aborto" ? "#DC2626" : "#64748B"} /> },
     { key: "paridera", label: "Paridera" },
   ];
   const ecoCols = [
     { key: "crotal", label: "Crotal", mono: true, bold: true },
     { key: "fecha", label: "Fecha", mono: true },
-    { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#B91C1C" : "#047857"} /> },
+    { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : "#059669"} /> },
     { key: "paridera", label: "Paridera" },
   ];
   const tratCols = [
@@ -1625,7 +1625,7 @@ function DashboardPage({ data }) {
   const cubCols = [
     { key: "crotal", label: "Crotal", mono: true, bold: true },
     { key: "fecha", label: "Fecha", mono: true },
-    { key: "metodo", label: "Metodo", render: v => <Badge text={v} color={v === "inseminacion" ? "#6D28D9" : "#B8860B"} /> },
+    { key: "metodo", label: "Metodo", render: v => <Badge text={v} color={v === "inseminacion" ? "#7C3AED" : "#E8950A"} /> },
     { key: "macho", label: "Macho" },
     { key: "paridera", label: "Paridera" },
   ];
@@ -1633,12 +1633,12 @@ function DashboardPage({ data }) {
     { key: "peseta", label: "Peseta", mono: true, bold: true },
     { key: "madre", label: "Madre", mono: true },
     { key: "fecha", label: "Nacimiento", mono: true },
-    { key: "sexo", label: "Sexo", render: v => <Badge text={v} color="#6D28D9" /> },
+    { key: "sexo", label: "Sexo", render: v => <Badge text={v} color="#7C3AED" /> },
   ];
 
   // Styles
   const sectionHeaderStyle = {
-    fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "'Outfit', sans-serif",
+    fontSize: 14, fontWeight: 700, color: "#1E293B", fontFamily: "'Outfit', sans-serif",
     display: "flex", alignItems: "center", gap: 10, marginBottom: 16,
   };
   const dotStyle = (color) => ({
@@ -1649,7 +1649,7 @@ function DashboardPage({ data }) {
     padding: "8px 12px", borderRadius: 8, background: "#F9FAFB", minWidth: 60,
   };
   const cardStyle = {
-    background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 14,
+    background: "#FFFFFF", border: "1px solid #EEF2F6", borderRadius: 14,
     padding: 20, boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
   };
   const clickableCardStyle = {
@@ -1664,32 +1664,32 @@ function DashboardPage({ data }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ position: "relative", flex: 1, maxWidth: 420 }}>
             <div style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", width: 16, height: 16 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
               </svg>
             </div>
             <input value={searchCrotal} onChange={e => setSearchCrotal(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && searchResults.length > 0) { setCabraHistorial(searchResults[0].crotal); setSearchCrotal(""); } }}
               placeholder="Buscar cabra por crotal..."
-              style={{ width: "100%", padding: "12px 16px 12px 42px", borderRadius: 10, border: "2px solid #E5E7EB", fontSize: 14, color: "#111827", outline: "none", background: "#FFF", boxSizing: "border-box", fontFamily: "'Space Mono', monospace" }}
-              onFocus={e => e.target.style.borderColor = "#1D4ED8"} onBlur={e => { setTimeout(() => setSearchCrotal(""), 200); e.target.style.borderColor = "#E5E7EB"; }} />
+              style={{ width: "100%", padding: "12px 16px 12px 42px", borderRadius: 10, border: "2px solid #EEF2F6", fontSize: 14, color: "#1E293B", outline: "none", background: "#FFF", boxSizing: "border-box", fontFamily: "'Space Mono', monospace" }}
+              onFocus={e => e.target.style.borderColor = "#E8950A"} onBlur={e => { setTimeout(() => setSearchCrotal(""), 200); e.target.style.borderColor = "#EEF2F6"; }} />
           </div>
-          <div style={{ fontSize: 12, color: "#6B7280" }}>Minimo 3 digitos del crotal</div>
+          <div style={{ fontSize: 12, color: "#64748B" }}>Minimo 3 digitos del crotal</div>
         </div>
         {searchResults.length > 0 && (
-          <div style={{ position: "absolute", top: "100%", left: 0, width: 420, marginTop: 4, background: "#FFF", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 50, overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: "100%", left: 0, width: 420, marginTop: 4, background: "#FFF", border: "1px solid #EEF2F6", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 50, overflow: "hidden" }}>
             {searchResults.map((c, i) => (
               <div key={i} onClick={() => { setCabraHistorial(c.crotal); setSearchCrotal(""); }}
                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", cursor: "pointer", borderBottom: "1px solid #F3F4F6" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div>
-                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#111827" }}>{c.crotal}</span>
-                  <span style={{ fontSize: 11, color: "#6B7280", marginLeft: 8 }}>{c.lote?.nombre || "Sin lote"}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Space Mono', monospace", color: "#1E293B" }}>{c.crotal}</span>
+                  <span style={{ fontSize: 11, color: "#64748B", marginLeft: 8 }}>{c.lote?.nombre || "Sin lote"}</span>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <Badge text={c.estado || "-"} color={c.estado === "lactacion" ? "#047857" : c.estado === "gestante" ? "#6D28D9" : "#6B7280"} />
-                  {c.num_lactaciones && <span style={{ fontSize: 11, color: "#6B7280", fontFamily: "'Space Mono', monospace" }}>L{c.num_lactaciones}</span>}
+                  <Badge text={c.estado || "-"} color={c.estado === "lactacion" ? "#059669" : c.estado === "gestante" ? "#7C3AED" : "#64748B"} />
+                  {c.num_lactaciones && <span style={{ fontSize: 11, color: "#64748B", fontFamily: "'Space Mono', monospace" }}>L{c.num_lactaciones}</span>}
                 </div>
               </div>
             ))}
@@ -1700,22 +1700,22 @@ function DashboardPage({ data }) {
       {/* === PARIDERA CARDS — MAIN NAVIGATION === */}
       <div>
         <div style={sectionHeaderStyle}>
-          <div style={dotStyle("#1D4ED8")} />
+          <div style={dotStyle("#E8950A")} />
           <span>Parideras</span>
-          <span style={{ fontSize: 12, fontWeight: 500, color: "#6B7280", marginLeft: 4 }}>({parideraData.length})</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: "#64748B", marginLeft: 4 }}>({parideraData.length})</span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
           {parideraData.map((p, idx) => {
             const isExpanded = expandedParidera === p.id;
-            const phaseColor = p.progreso >= 80 ? "#047857" : p.progreso >= 40 ? "#6D28D9" : "#B8860B";
+            const phaseColor = p.progreso >= 80 ? "#059669" : p.progreso >= 40 ? "#7C3AED" : "#E8950A";
             const phaseLabel = p.progreso >= 80 ? "Partos" : p.progreso >= 40 ? "Gestacion" : "Cubricion";
             return (
               <div key={p.id} style={{ ...cardStyle, borderLeft: `4px solid ${phaseColor}`, transition: "all 0.2s ease" }}>
                 {/* Header */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                   <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", fontFamily: "'Outfit', sans-serif" }}>{p.nombre}</div>
-                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1E293B", fontFamily: "'Outfit', sans-serif" }}>{p.nombre}</div>
+                    <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
                       Machos: {p.fechaMachosStr}
                       {p.fechaPartosStr !== "-" && <span style={{ marginLeft: 12 }}>Partos est.: {p.fechaPartosStr}</span>}
                     </div>
@@ -1731,31 +1731,31 @@ function DashboardPage({ data }) {
                 {/* Stats row */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                   <div style={statBoxStyle} onClick={() => { if (p.partosCount > 0) setModal(`partos_paridera_${p.id}`); }} title="Partos">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#047857", fontFamily: "'Space Mono', monospace", cursor: p.partosCount > 0 ? "pointer" : "default" }}>{p.partosCount}</span>
-                    <span style={{ fontSize: 10, color: "#6B7280" }}>Partos</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#059669", fontFamily: "'Space Mono', monospace", cursor: p.partosCount > 0 ? "pointer" : "default" }}>{p.partosCount}</span>
+                    <span style={{ fontSize: 10, color: "#64748B" }}>Partos</span>
                   </div>
                   <div style={statBoxStyle} onClick={() => { if (p.ecosCount > 0) setModal(`eco_paridera_${p.id}`); }} title="Ecografias">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#6D28D9", fontFamily: "'Space Mono', monospace", cursor: p.ecosCount > 0 ? "pointer" : "default" }}>{p.ecosCount}</span>
-                    <span style={{ fontSize: 10, color: "#6B7280" }}>Ecos</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#7C3AED", fontFamily: "'Space Mono', monospace", cursor: p.ecosCount > 0 ? "pointer" : "default" }}>{p.ecosCount}</span>
+                    <span style={{ fontSize: 10, color: "#64748B" }}>Ecos</span>
                   </div>
                   <div style={statBoxStyle} onClick={() => { if (p.cubsCount > 0) setModal(`cubs_paridera_${p.id}`); }} title="Cubriciones">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#B8860B", fontFamily: "'Space Mono', monospace", cursor: p.cubsCount > 0 ? "pointer" : "default" }}>{p.cubsCount}</span>
-                    <span style={{ fontSize: 10, color: "#6B7280" }}>Cubr.</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace", cursor: p.cubsCount > 0 ? "pointer" : "default" }}>{p.cubsCount}</span>
+                    <span style={{ fontSize: 10, color: "#64748B" }}>Cubr.</span>
                   </div>
                   <div style={statBoxStyle} onClick={() => { if (p.criasCount > 0) setModal(`crias_paridera_${p.id}`); }} title="Crias">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#0F766E", fontFamily: "'Space Mono', monospace", cursor: p.criasCount > 0 ? "pointer" : "default" }}>{p.criasCount}</span>
-                    <span style={{ fontSize: 10, color: "#6B7280" }}>Crias</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#0891B2", fontFamily: "'Space Mono', monospace", cursor: p.criasCount > 0 ? "pointer" : "default" }}>{p.criasCount}</span>
+                    <span style={{ fontSize: 10, color: "#64748B" }}>Crias</span>
                   </div>
                   <div style={statBoxStyle} onClick={() => { if (p.tratsCount > 0) setModal(`trat_paridera_${p.id}`); }} title="Tratamientos">
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#1D4ED8", fontFamily: "'Space Mono', monospace", cursor: p.tratsCount > 0 ? "pointer" : "default" }}>{p.tratsCount}</span>
-                    <span style={{ fontSize: 10, color: "#6B7280" }}>Trats.</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#E8950A", fontFamily: "'Space Mono', monospace", cursor: p.tratsCount > 0 ? "pointer" : "default" }}>{p.tratsCount}</span>
+                    <span style={{ fontSize: 10, color: "#64748B" }}>Trats.</span>
                   </div>
                 </div>
 
                 {/* Expand toggle */}
                 <div
                   onClick={() => setExpandedParidera(isExpanded ? null : p.id)}
-                  style={{ fontSize: 12, color: "#1D4ED8", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, userSelect: "none" }}>
+                  style={{ fontSize: 12, color: "#E8950A", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, userSelect: "none" }}>
                   <span style={{ transition: "transform 0.2s", display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
                   </span>
@@ -1768,26 +1768,26 @@ function DashboardPage({ data }) {
                     {/* Eco summary */}
                     {p.ecosCount > 0 && (
                       <div style={{ marginBottom: 10 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Ecografias</div>
-                        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#111827" }}>
-                          <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#047857", marginRight: 4 }}></span>Gestantes: <strong>{p.gestantes}</strong></span>
-                          <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 4 }}></span>Vacias: <strong>{p.vacias}</strong></span>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Ecografias</div>
+                        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#1E293B" }}>
+                          <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#059669", marginRight: 4 }}></span>Gestantes: <strong>{p.gestantes}</strong></span>
+                          <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#DC2626", marginRight: 4 }}></span>Vacias: <strong>{p.vacias}</strong></span>
                         </div>
                       </div>
                     )}
                     {/* Partos summary */}
                     {p.partosCount > 0 && (
                       <div style={{ marginBottom: 10 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Partos</div>
-                        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#111827" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Partos</div>
+                        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#1E293B" }}>
                           <span>Normales: <strong>{p.partosNormales}</strong></span>
-                          {p.abortos > 0 && <span style={{ color: "#B91C1C" }}>Abortos: <strong>{p.abortos}</strong></span>}
+                          {p.abortos > 0 && <span style={{ color: "#DC2626" }}>Abortos: <strong>{p.abortos}</strong></span>}
                           <span>Crias nacidas: <strong>{p.totalCrias}</strong></span>
                         </div>
                       </div>
                     )}
                     {/* Progress detail */}
-                    <div style={{ fontSize: 11, color: "#6B7280" }}>
+                    <div style={{ fontSize: 11, color: "#64748B" }}>
                       Progreso: <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: phaseColor }}>{p.progreso}%</span>
                     </div>
                   </div>
@@ -1803,30 +1803,30 @@ function DashboardPage({ data }) {
         {/* Cabras (rebano) */}
         <div style={{ ...clickableCardStyle }}
           onClick={() => setModal("cabras")}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = "#1D4ED8"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(29,78,216,0.08)"; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(29,78,216,0.08)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
           <div style={sectionHeaderStyle}>
-            <div style={dotStyle("#B8860B")} />
+            <div style={dotStyle("#E8950A")} />
             <span>Cabras (rebano)</span>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
-            <span style={{ fontSize: 32, fontWeight: 800, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{totalCabras}</span>
-            <span style={{ fontSize: 13, color: "#6B7280" }}>en {lotesSorted.length} lotes</span>
+            <span style={{ fontSize: 32, fontWeight: 800, color: "#1E293B", fontFamily: "'Space Mono', monospace" }}>{totalCabras}</span>
+            <span style={{ fontSize: 13, color: "#64748B" }}>en {lotesSorted.length} lotes</span>
           </div>
           {/* Lote distribution mini */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {lotesSorted.slice(0, 7).map((l, i) => {
               const pct = (l.cabras / totalCabras * 100).toFixed(0);
-              const barColors = { "Lote 1": "#B8860B", "Lote 2": "#B91C1C", "Lote 3": "#6D28D9", "Lote 4": "#1D4ED8", "Lote 5": "#0F766E", "Lote 6": "#B8860B", "Lote 13": "#047857" };
-              const color = barColors[l.nombre] || "#6B7280";
+              const barColors = { "Lote 1": "#E8950A", "Lote 2": "#DC2626", "Lote 3": "#7C3AED", "Lote 4": "#E8950A", "Lote 5": "#0891B2", "Lote 6": "#E8950A", "Lote 13": "#059669" };
+              const color = barColors[l.nombre] || "#64748B";
               return (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: "#6B7280", minWidth: 55 }}>{l.nombre}</span>
+                  <span style={{ fontSize: 12, color: "#64748B", minWidth: 55 }}>{l.nombre}</span>
                   <div style={{ flex: 1, height: 4, background: "#F3F4F6", borderRadius: 2, overflow: "hidden" }}>
                     <div style={{ height: "100%", borderRadius: 2, background: color, width: `${pct}%` }} />
                   </div>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "'Space Mono', monospace", minWidth: 30, textAlign: "right" }}>{l.cabras}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1E293B", fontFamily: "'Space Mono', monospace", minWidth: 30, textAlign: "right" }}>{l.cabras}</span>
                 </div>
               );
             })}
@@ -1836,31 +1836,31 @@ function DashboardPage({ data }) {
         {/* Tratamientos Generales */}
         <div style={{ ...clickableCardStyle }}
           onClick={() => setModal("trat")}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = "#1D4ED8"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(29,78,216,0.08)"; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8950A"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(29,78,216,0.08)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
           <div style={sectionHeaderStyle}>
-            <div style={dotStyle("#1D4ED8")} />
+            <div style={dotStyle("#E8950A")} />
             <span>Tratamientos Generales</span>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
-            <span style={{ fontSize: 32, fontWeight: 800, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{tratsGenerales.length}</span>
-            <span style={{ fontSize: 13, color: "#6B7280" }}>sin paridera asignada</span>
+            <span style={{ fontSize: 32, fontWeight: 800, color: "#1E293B", fontFamily: "'Space Mono', monospace" }}>{tratsGenerales.length}</span>
+            <span style={{ fontSize: 13, color: "#64748B" }}>sin paridera asignada</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {Object.entries(tratsGeneralesByTipo).sort((a, b) => b[1] - a[1]).map(([tipo, count], i) => {
-              const tipoColors = { vacunacion: "#047857", desparasitacion: "#6D28D9", fertilidad: "#B8860B", antibiotico: "#B91C1C", tratamiento: "#1D4ED8", general: "#6B7280" };
-              const color = tipoColors[tipo] || "#6B7280";
+              const tipoColors = { vacunacion: "#059669", desparasitacion: "#7C3AED", fertilidad: "#E8950A", antibiotico: "#DC2626", tratamiento: "#E8950A", general: "#64748B" };
+              const color = tipoColors[tipo] || "#64748B";
               return (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: "#6B7280", textTransform: "capitalize", flex: 1 }}>{tipo}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{count}</span>
+                  <span style={{ fontSize: 12, color: "#64748B", textTransform: "capitalize", flex: 1 }}>{tipo}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1E293B", fontFamily: "'Space Mono', monospace" }}>{count}</span>
                 </div>
               );
             })}
           </div>
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6", fontSize: 12, color: "#6B7280" }}>
-            Total tratamientos (incl. parideras): <span style={{ fontWeight: 700, color: "#111827", fontFamily: "'Space Mono', monospace" }}>{data.tratamientos.length}</span>
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6", fontSize: 12, color: "#64748B" }}>
+            Total tratamientos (incl. parideras): <span style={{ fontWeight: 700, color: "#1E293B", fontFamily: "'Space Mono', monospace" }}>{data.tratamientos.length}</span>
           </div>
         </div>
       </div>
@@ -1887,7 +1887,7 @@ function DashboardPage({ data }) {
         return (
           <div style={cardStyle}>
             <div style={sectionHeaderStyle}>
-              <div style={dotStyle("#6D28D9")} />
+              <div style={dotStyle("#7C3AED")} />
               <span>Inteligencia del Dia</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
@@ -1895,14 +1895,14 @@ function DashboardPage({ data }) {
               {/* Tendencia global */}
               {tendencias.resumen && (
                 <div style={{ background: "#F5F3FF", border: "1px solid #E9E5FF", borderRadius: 10, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6D28D9", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={dotStyle("#6D28D9")} /> Tendencia del Rebano
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#7C3AED")} /> Tendencia del Rebano
                   </div>
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: tendencias.resumen.cambioGlobal >= 0 ? "#047857" : "#B91C1C", fontFamily: "'Space Mono', monospace" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: tendencias.resumen.cambioGlobal >= 0 ? "#059669" : "#DC2626", fontFamily: "'Space Mono', monospace" }}>
                       {tendencias.resumen.cambioGlobal >= 0 ? "+" : ""}{tendencias.resumen.cambioGlobal.toFixed(1)}%
                     </div>
-                    <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 12, color: "#64748B", lineHeight: 1.5 }}>
                       Media: {tendencias.resumen.mediaHoy?.toFixed(2)}L/cabra<br />
                       vs {tendencias.resumen.mediaAyer?.toFixed(2)}L dia anterior
                     </div>
@@ -1913,40 +1913,40 @@ function DashboardPage({ data }) {
               {/* Alertas criticas */}
               {criticas.length > 0 && (
                 <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#B91C1C", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={dotStyle("#B91C1C")} /> Criticas ({criticas.length})
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#DC2626")} /> Criticas ({criticas.length})
                   </div>
                   {criticas.slice(0, 5).map((t, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#111827", padding: "4px 0", borderBottom: i < Math.min(criticas.length, 5) - 1 ? "1px solid #FEE2E2" : "none" }}>
-                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#B91C1C" }}>{t.crotal}</span>
-                      <span style={{ marginLeft: 8, color: "#6B7280" }}>{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} -- {t.detalle}</span>
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "4px 0", borderBottom: i < Math.min(criticas.length, 5) - 1 ? "1px solid #FEE2E2" : "none" }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: "#DC2626" }}>{t.crotal}</span>
+                      <span style={{ marginLeft: 8, color: "#64748B" }}>{t.tipo === "MASTITIS_PROBABLE" ? "Posible mastitis" : t.tipo} -- {t.detalle}</span>
                     </div>
                   ))}
-                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 4 }}>+ {criticas.length - 5} mas</div>}
+                  {criticas.length > 5 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 4 }}>+ {criticas.length - 5} mas</div>}
                 </div>
               )}
 
               {/* Reproductivo */}
               {(secadosUrg.length > 0 || ecosPend.length > 0 || partosNR.length > 0) && (
                 <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 10, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#B8860B", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={dotStyle("#B8860B")} /> Reproductivo
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#E8950A", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#E8950A")} /> Reproductivo
                   </div>
                   {secadosUrg.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#111827", padding: "4px 0" }}>
-                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 6 }}></span>
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#DC2626", marginRight: 6 }}></span>
                       <strong>{secadosUrg.length}</strong> secados urgentes: {secadosUrg.slice(0, 4).map(a => a.crotal).join(", ")}{secadosUrg.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {ecosPend.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#111827", padding: "4px 0" }}>
-                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#6D28D9", marginRight: 6 }}></span>
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#7C3AED", marginRight: 6 }}></span>
                       <strong>{ecosPend.length}</strong> ecografias pendientes: {ecosPend.slice(0, 4).map(a => a.crotal).join(", ")}{ecosPend.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {partosNR.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#B91C1C", padding: "4px 0" }}>
-                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 6 }}></span>
+                    <div style={{ fontSize: 12, color: "#DC2626", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#DC2626", marginRight: 6 }}></span>
                       <strong>{partosNR.length}</strong> partos sin registrar: {partosNR.slice(0, 4).map(a => a.crotal).join(", ")}{partosNR.length > 4 ? "..." : ""}
                     </div>
                   )}
@@ -1956,14 +1956,14 @@ function DashboardPage({ data }) {
               {/* Proximos eventos */}
               {proxEventos.length > 0 && (
                 <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#1D4ED8", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={dotStyle("#1D4ED8")} /> Proximos Eventos
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#E8950A", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#E8950A")} /> Proximos Eventos
                   </div>
                   {proxEventos.map((e, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#111827", padding: "3px 0" }}>
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
                       <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 600 }}>{e.crotal}</span>
-                      <span style={{ marginLeft: 8, color: "#6B7280" }}>{e.detalle}</span>
-                      <span style={{ marginLeft: 6, fontSize: 10, color: "#1D4ED8", fontWeight: 600 }}>en {e.diasHasta}d</span>
+                      <span style={{ marginLeft: 8, color: "#64748B" }}>{e.detalle}</span>
+                      <span style={{ marginLeft: 6, fontSize: 10, color: "#E8950A", fontWeight: 600 }}>en {e.diasHasta}d</span>
                     </div>
                   ))}
                 </div>
@@ -1972,18 +1972,18 @@ function DashboardPage({ data }) {
               {/* Declives + respuestas tratamiento */}
               {(declives.length > 0 || respuestas.length > 0) && (
                 <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 10, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#047857", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={dotStyle("#047857")} /> Tendencias Individuales
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#059669")} /> Tendencias Individuales
                   </div>
                   {declives.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#111827", padding: "4px 0" }}>
-                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#B91C1C", marginRight: 6 }}></span>
+                    <div style={{ fontSize: 12, color: "#1E293B", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#DC2626", marginRight: 6 }}></span>
                       <strong>{declives.length}</strong> cabras en declive: {declives.slice(0, 4).map(t => t.crotal).join(", ")}{declives.length > 4 ? "..." : ""}
                     </div>
                   )}
                   {respuestas.length > 0 && (
-                    <div style={{ fontSize: 12, color: "#047857", padding: "4px 0" }}>
-                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#047857", marginRight: 6 }}></span>
+                    <div style={{ fontSize: 12, color: "#059669", padding: "4px 0" }}>
+                      <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#059669", marginRight: 6 }}></span>
                       <strong>{respuestas.length}</strong> respondiendo a tratamiento: {respuestas.slice(0, 4).map(t => t.crotal).join(", ")}{respuestas.length > 4 ? "..." : ""}
                     </div>
                   )}
@@ -1993,11 +1993,11 @@ function DashboardPage({ data }) {
               {/* Tratamientos con baja efectividad */}
               {tratsBajos.length > 0 && (
                 <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#B8860B", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={dotStyle("#B8860B")} /> Tratamientos a Revisar
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#E8950A", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#E8950A")} /> Tratamientos a Revisar
                   </div>
                   {tratsBajos.map((t, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#111827", padding: "3px 0" }}>
+                    <div key={i} style={{ fontSize: 12, color: "#1E293B", padding: "3px 0" }}>
                       <strong>{t.producto}</strong> ({t.tipo}): {t.tasaEfectividad}% efectividad ({t.efectivo}/{t.total} casos)
                     </div>
                   ))}
@@ -2006,15 +2006,15 @@ function DashboardPage({ data }) {
 
               {/* Ultimo resumen guardado */}
               {ultimoResumen && (
-                <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, padding: "13px 16px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={dotStyle("#6B7280")} /> Ultima Importacion
+                <div style={{ background: "#F9FAFB", border: "1px solid #EEF2F6", borderRadius: 10, padding: "13px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={dotStyle("#64748B")} /> Ultima Importacion
                   </div>
-                  <div style={{ fontSize: 12, color: "#6B7280" }}>
+                  <div style={{ fontSize: 12, color: "#64748B" }}>
                     {new Date(ultimoResumen.fecha).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })} -- {ultimoResumen.total_cabras} cabras, {ultimoResumen.litros_totales?.toFixed(0)}L totales
                   </div>
-                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas criticas detectadas</div>}
-                  {ultimoResumen.timeline_alertas > 0 && <div style={{ fontSize: 11, color: "#B8860B", marginTop: 2 }}>{ultimoResumen.timeline_alertas} alertas reproductivas</div>}
+                  {ultimoResumen.tendencias_criticas > 0 && <div style={{ fontSize: 11, color: "#DC2626", marginTop: 3 }}>{ultimoResumen.tendencias_criticas} alertas criticas detectadas</div>}
+                  {ultimoResumen.timeline_alertas > 0 && <div style={{ fontSize: 11, color: "#E8950A", marginTop: 2 }}>{ultimoResumen.timeline_alertas} alertas reproductivas</div>}
                 </div>
               )}
             </div>
@@ -2027,20 +2027,20 @@ function DashboardPage({ data }) {
         {/* Alertas */}
         <div style={cardStyle}>
           <div style={sectionHeaderStyle}>
-            <div style={dotStyle("#B91C1C")} />
+            <div style={dotStyle("#DC2626")} />
             <span>Alertas y Advertencias</span>
           </div>
-          {alertas.length === 0 && <div style={{ color: "#6B7280", fontSize: 13, padding: 16, textAlign: "center" }}>Sin alertas activas</div>}
+          {alertas.length === 0 && <div style={{ color: "#64748B", fontSize: 13, padding: 16, textAlign: "center" }}>Sin alertas activas</div>}
           {alertas.map((a, i) => {
             const bg = { alta: "#FEF2F2", media: "#FFFBEB", info: "#EFF6FF" }[a.tipo] || "#F9FAFB";
-            const bd = { alta: "#FECACA", media: "#FDE68A", info: "#BFDBFE" }[a.tipo] || "#E5E7EB";
-            const dotColor = { alta: "#B91C1C", media: "#B8860B", info: "#1D4ED8" }[a.tipo] || "#6B7280";
+            const bd = { alta: "#FECACA", media: "#FDE68A", info: "#BFDBFE" }[a.tipo] || "#EEF2F6";
+            const dotColor = { alta: "#DC2626", media: "#E8950A", info: "#E8950A" }[a.tipo] || "#64748B";
             return (
               <div key={i} style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 10, padding: "11px 15px", display: "flex", gap: 11, marginBottom: 8, alignItems: "flex-start" }}>
                 <div style={{ ...dotStyle(dotColor), marginTop: 5, flexShrink: 0 }} />
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{a.msg}</div>
-                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{a.detalle}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1E293B" }}>{a.msg}</div>
+                  <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{a.detalle}</div>
                 </div>
               </div>
             );
@@ -2050,21 +2050,21 @@ function DashboardPage({ data }) {
         {/* Eventos */}
         <div style={cardStyle}>
           <div style={sectionHeaderStyle}>
-            <div style={dotStyle("#0F766E")} />
+            <div style={dotStyle("#0891B2")} />
             <span>Proximos Eventos</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {calendario.length === 0 && <div style={{ color: "#6B7280", fontSize: 13, padding: 16, textAlign: "center" }}>Sin eventos pendientes</div>}
+            {calendario.length === 0 && <div style={{ color: "#64748B", fontSize: 13, padding: 16, textAlign: "center" }}>Sin eventos pendientes</div>}
             {calendario.map((c, i) => {
-              const col = { cubricion: "#B8860B", sanidad: "#B91C1C", ecografia: "#6D28D9", parto: "#047857", identificacion: "#0F766E" }[c.tipo] || "#6B7280";
+              const col = { cubricion: "#E8950A", sanidad: "#DC2626", ecografia: "#7C3AED", parto: "#059669", identificacion: "#0891B2" }[c.tipo] || "#64748B";
               return (
                 <div key={i} style={{ display: "flex", gap: 11, alignItems: "center", padding: "9px 13px", borderRadius: 8, background: c.urgente ? "#FEF2F2" : "#F9FAFB", border: `1px solid ${c.urgente ? "#FECACA" : "#F3F4F6"}` }}>
                   <div style={{ width: 3, height: 28, borderRadius: 2, background: col, flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "#111827" }}>{c.evento}</div>
-                    <div style={{ fontSize: 11, color: "#6B7280" }}>{c.fecha}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1E293B" }}>{c.evento}</div>
+                    <div style={{ fontSize: 11, color: "#64748B" }}>{c.fecha}</div>
                   </div>
-                  {c.urgente && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, background: "#FEE2E2", color: "#B91C1C", fontWeight: 700, letterSpacing: "0.05em" }}>URGENTE</span>}
+                  {c.urgente && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, background: "#FEE2E2", color: "#DC2626", fontWeight: 700, letterSpacing: "0.05em" }}>URGENTE</span>}
                 </div>
               );
             })}
@@ -2101,10 +2101,10 @@ function DashboardPage({ data }) {
           { key: "edad", label: "Edad", mono: true },
           { key: "lactaciones", label: "Lact.", mono: true },
           { key: "del", label: "DEL", mono: true },
-          { key: "estado", label: "Estado", render: v => <Badge text={v} color={v === "lactacion" ? "#047857" : v === "gestante" ? "#6D28D9" : v === "cubricion" ? "#B8860B" : v === "preparto" ? "#B91C1C" : "#6B7280"} /> },
+          { key: "estado", label: "Estado", render: v => <Badge text={v} color={v === "lactacion" ? "#059669" : v === "gestante" ? "#7C3AED" : v === "cubricion" ? "#E8950A" : v === "preparto" ? "#DC2626" : "#64748B"} /> },
           { key: "estado_gine", label: "Est. Gine." },
         ];
-        return <DataModal title="Cabras" icon="" accent="#B8860B" data={cabrasModalData} columns={cabraCols} onClose={() => setModal(null)} searchPH="Buscar crotal, estado, lote..." folders={cabraFolders} onRowClick={(r) => setCabraHistorial(r.crotal)} />;
+        return <DataModal title="Cabras" icon="" accent="#E8950A" data={cabrasModalData} columns={cabraCols} onClose={() => setModal(null)} searchPH="Buscar crotal, estado, lote..." folders={cabraFolders} onRowClick={(r) => setCabraHistorial(r.crotal)} />;
       })()}
 
       {cabraHistorial && <CabraHistorialModal crotal={cabraHistorial} data={data} onClose={() => setCabraHistorial(null)} />}
@@ -2113,7 +2113,7 @@ function DashboardPage({ data }) {
       {modal === "partos" && (() => {
         const d = partosModal.map(p => ({ ...p, __folder: p.paridera || "Sin paridera" }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Partos" icon="" accent="#047857" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+        return <DataModal title="Partos" icon="" accent="#059669" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
       })()}
 
       {/* Global eco modal */}
@@ -2135,24 +2135,24 @@ function DashboardPage({ data }) {
         const ecColsWithRonda = [
           { key: "crotal", label: "Crotal", mono: true, bold: true },
           { key: "fecha", label: "Fecha", mono: true },
-          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#B91C1C" : v === "hidrometra" ? "#B8860B" : "#047857"} /> },
+          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : v === "hidrometra" ? "#E8950A" : "#059669"} /> },
           { key: "paridera", label: "Paridera" },
         ];
-        return <DataModal title="Ecografias" icon="" accent="#6D28D9" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={subs} />;
+        return <DataModal title="Ecografias" icon="" accent="#7C3AED" data={d} columns={ecColsWithRonda} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} subfolders={subs} />;
       })()}
 
       {/* Global trat modal */}
       {modal === "trat" && (() => {
         const d = tratsModal.map(t => ({ ...t, __folder: t.tipo || "Sin tipo" }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Tratamientos" icon="" accent="#1D4ED8" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+        return <DataModal title="Tratamientos" icon="" accent="#E8950A" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
       })()}
 
       {/* Global cubs modal */}
       {modal === "cubs" && (() => {
         const d = cubsModal.map(c => ({ ...c, __folder: c.paridera || "Sin paridera" }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Cubriciones" icon="" accent="#B8860B" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal, metodo..." folders={folders} />;
+        return <DataModal title="Cubriciones" icon="" accent="#E8950A" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal, metodo..." folders={folders} />;
       })()}
 
       {/* Global crias modal */}
@@ -2163,7 +2163,7 @@ function DashboardPage({ data }) {
           return { ...c, __folder: parideraName };
         });
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title="Crias Hembra" icon="" accent="#0F766E" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
+        return <DataModal title="Crias Hembra" icon="" accent="#0891B2" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
       })()}
 
       {/* === PER-PARIDERA MODALS === */}
@@ -2182,7 +2182,7 @@ function DashboardPage({ data }) {
           __folder: p.tipo || "normal",
         }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title={`Partos - ${paridera?.nombre || "Paridera"}`} icon="" accent="#047857" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal..." folders={folders} />;
+        return <DataModal title={`Partos - ${paridera?.nombre || "Paridera"}`} icon="" accent="#059669" data={d} columns={partoCols} onClose={() => setModal(null)} searchPH="Buscar crotal..." folders={folders} />;
       })()}
 
       {/* Ecos filtered by paridera */}
@@ -2204,9 +2204,9 @@ function DashboardPage({ data }) {
         const ecColsLocal = [
           { key: "crotal", label: "Crotal", mono: true, bold: true },
           { key: "fecha", label: "Fecha", mono: true },
-          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#B91C1C" : v === "hidrometra" ? "#B8860B" : "#047857"} /> },
+          { key: "resultado", label: "Resultado", render: v => <Badge text={v} color={v === "vacia" ? "#DC2626" : v === "hidrometra" ? "#E8950A" : "#059669"} /> },
         ];
-        return <DataModal title={`Ecografias - ${paridera?.nombre || "Paridera"}`} icon="" accent="#6D28D9" data={d} columns={ecColsLocal} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} />;
+        return <DataModal title={`Ecografias - ${paridera?.nombre || "Paridera"}`} icon="" accent="#7C3AED" data={d} columns={ecColsLocal} onClose={() => setModal(null)} searchPH="Buscar crotal, resultado..." folders={folders} />;
       })()}
 
       {/* Cubs filtered by paridera */}
@@ -2222,7 +2222,7 @@ function DashboardPage({ data }) {
           __folder: c.metodo || "Sin metodo",
         }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title={`Cubriciones - ${paridera?.nombre || "Paridera"}`} icon="" accent="#B8860B" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal..." folders={folders} />;
+        return <DataModal title={`Cubriciones - ${paridera?.nombre || "Paridera"}`} icon="" accent="#E8950A" data={d} columns={cubCols} onClose={() => setModal(null)} searchPH="Buscar crotal..." folders={folders} />;
       })()}
 
       {/* Crias filtered by paridera */}
@@ -2242,7 +2242,7 @@ function DashboardPage({ data }) {
           __folder: c.sexo || "Sin sexo",
         }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title={`Crias - ${paridera?.nombre || "Paridera"}`} icon="" accent="#0F766E" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
+        return <DataModal title={`Crias - ${paridera?.nombre || "Paridera"}`} icon="" accent="#0891B2" data={d} columns={criasCols} onClose={() => setModal(null)} searchPH="Buscar peseta, madre..." folders={folders} />;
       })()}
 
       {/* Trats filtered by paridera */}
@@ -2257,7 +2257,7 @@ function DashboardPage({ data }) {
           __folder: t.tipo || "Sin tipo",
         }));
         const folders = [...new Set(d.map(r => r.__folder))].map(f => ({ name: f, count: d.filter(r => r.__folder === f).length }));
-        return <DataModal title={`Tratamientos - ${paridera?.nombre || "Paridera"}`} icon="" accent="#1D4ED8" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
+        return <DataModal title={`Tratamientos - ${paridera?.nombre || "Paridera"}`} icon="" accent="#E8950A" data={d} columns={tratCols} onClose={() => setModal(null)} searchPH="Buscar crotal, tipo..." folders={folders} />;
       })()}
 
     </div>
@@ -3454,7 +3454,7 @@ function ImportadorPage({ data, refresh, saveChat }) {
             else if (csvType === "ecografia") importEcografia(rawRows);
           }} disabled={importing}
             style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: importing ? "wait" : "pointer",
-              background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #047857)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
+              background: importing ? "#94A3B8" : csvType === "produccion" ? "linear-gradient(135deg, #059669, #059669)" : "linear-gradient(135deg, #0891B2, #0E7490)", color: "#FFF",
             }}>
             {importing ? "Importando..." : "Importar " + rawRows.length + " registros a Supabase"}
           </button>

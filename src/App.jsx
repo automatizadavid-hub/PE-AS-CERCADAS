@@ -70,19 +70,24 @@ function buildDataContext(data) {
       const totalProm = dayProd.reduce((s, p) => s + (p.promedio_10d || p.media_10d || p.litros || 0), 0);
       lines.push(`  ${fecha}: ${dayProd.length} cabras, promedio10d total: ${totalProm.toFixed(1)}L, media: ${(totalProm / dayProd.length).toFixed(2)}L/cabra`);
     });
-    // Send individual cabra production with promedio_10d for the latest date
+    // Send COMPLETE production data per cabra from latest date
     const latestDate = allDates[0];
     const latestProd = prod.filter(p => p.fecha === latestDate);
     if (latestProd.length > 0) {
-      lines.push(`\nProduccion por cabra (promedio 10d, fecha ${latestDate}):`);
-      latestProd.sort((a, b) => (b.promedio_10d || b.media_10d || b.litros || 0) - (a.promedio_10d || a.media_10d || a.litros || 0));
+      lines.push(`\nPRODUCCION COMPLETA POR CABRA (fecha ${latestDate}) — ORDENADO POR p10d:`);
+      lines.push(`Columnas: crotal | p10d(L) | litTotal(L) | DEL | lactacion | cond(mS) | flujo | lote`);
+      latestProd.sort((a, b) => (b.promedio_10d || b.media_10d || 0) - (a.promedio_10d || a.media_10d || 0));
       latestProd.forEach(p => {
         const cabra = data.cabras.find(c => c.id === p.cabra_id);
-        const prom10d = p.promedio_10d || p.media_10d || 0;
-        const lote = cabra?.lote?.nombre || "Sin lote";
-        if (cabra && prom10d > 0) {
-          lines.push(`  ${cabra.crotal} ${lote} DEL=${p.dia_lactacion || 0} p10d=${prom10d.toFixed(2)}L cond=${(p.conductividad || 0).toFixed(1)}`);
-        }
+        if (!cabra) return;
+        const p10d = p.promedio_10d || p.media_10d || 0;
+        const litTotal = p.litros_totales_lactacion || 0;
+        const del = p.dia_lactacion || 0;
+        const lact = p.lactacion_num || cabra.num_lactaciones || 0;
+        const cond = p.conductividad || 0;
+        const flujo = p.flujo || 0;
+        const lote = cabra.lote?.nombre || "Sin lote";
+        lines.push(`  ${cabra.crotal} | ${p10d.toFixed(2)} | ${litTotal.toFixed(1)} | ${del} | L${lact} | ${cond.toFixed(1)} | ${flujo.toFixed(2)} | ${lote}`);
       });
     }
   }

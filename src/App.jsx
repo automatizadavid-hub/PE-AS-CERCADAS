@@ -942,26 +942,26 @@ function useSupabaseData() {
 // SHARED COMPONENTS (same as before)
 // ==========================================
 function Badge({ text, color }) {
-  return <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, background: `${color}10`, color, fontWeight: 600 }}>{text}</span>;
+  return <span style={{ fontSize: 13, padding: "4px 12px", borderRadius: 6, background: `${color}10`, color, fontWeight: 600 }}>{text}</span>;
 }
 function Card({ children, style = {} }) {
-  return <div style={{ background: "#FFF", border: "none", borderRadius: 16, padding: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)", ...style }}>{children}</div>;
+  return <div style={{ background: "#FFF", border: "none", borderRadius: 16, padding: "28px 30px", boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)", ...style }}>{children}</div>;
 }
 function SectionTitle({ icon, text, color = "#1A1A1A" }) {
-  return <div style={{ fontSize: 16, fontWeight: 700, color, marginBottom: 16, fontFamily: "'Outfit', sans-serif", display: "flex", alignItems: "center", gap: 8 }}>{icon && <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }}></span>}{text}</div>;
+  return <div style={{ fontSize: 20, fontWeight: 800, color, marginBottom: 20, fontFamily: "'Outfit', sans-serif", display: "flex", alignItems: "center", gap: 10 }}>{icon && <span style={{ width: 10, height: 10, borderRadius: "50%", background: color, flexShrink: 0 }}></span>}{text}</div>;
 }
 function KPI({ icon, label, value, sub, accent, onClick }) {
   return (
-    <div style={{ background: "#FFF", border: "none", borderRadius: 14, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 6, position: "relative", overflow: "hidden", transition: "all .25s", cursor: onClick ? "pointer" : "default", boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)" }}
+    <div style={{ background: "#FFF", border: "none", borderRadius: 14, padding: "24px 26px", display: "flex", flexDirection: "column", gap: 8, position: "relative", overflow: "hidden", transition: "all .25s", cursor: onClick ? "pointer" : "default", boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)" }}
       onClick={onClick}
       onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.08)"; }}
       onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)"; }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "#8C8C8C", letterSpacing: ".03em", textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
-        {onClick && <span style={{ fontSize: 11, color: "#C0C0C0" }}>Ver</span>}
+        <span style={{ fontSize: 14, color: "#64748B", letterSpacing: ".03em", textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
+        {onClick && <span style={{ fontSize: 13, color: "#A0A0A0" }}>Ver</span>}
       </div>
-      <div style={{ fontSize: 32, fontWeight: 700, color: "#1A1A1A", fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: "#8C8C8C" }}>{sub}</div>}
+      <div style={{ fontSize: 36, fontWeight: 800, color: "#1A1A1A", fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 14, color: "#64748B" }}>{sub}</div>}
     </div>
   );
 }
@@ -986,20 +986,20 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
 
   // Render a grid of clickable cards (used for folders and subfolders)
   const renderCards = (items, onClick, getIcon) => (
-    <div style={{ flex: 1, overflow: "auto", padding: "20px 26px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+    <div style={{ flex: 1, overflow: "auto", padding: "24px 30px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
         {items.map((item, i) => (
           <div key={i} onClick={() => onClick(item)}
-            style={{ background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 14, padding: "20px", cursor: "pointer", transition: "all .2s", display: "flex", alignItems: "center", gap: 14 }}
+            style={{ background: "#FAFAFA", border: "1px solid #EEF2F6", borderRadius: 14, padding: "24px", cursor: "pointer", transition: "all .2s", display: "flex", alignItems: "center", gap: 16 }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}50`; e.currentTarget.style.background = `${accent}06`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 16px ${accent}12`; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "#EEF2F6"; e.currentTarget.style.background = "#FAFAFA"; e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "none"; }}
           >
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: `${accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
               {getIcon(item)}
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#1E293B" }}>{item.name}</div>
-              <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{item.count} registros</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A" }}>{item.name}</div>
+              <div style={{ fontSize: 14, color: "#64748B", marginTop: 3 }}>{item.count} registros</div>
             </div>
           </div>
         ))}
@@ -1009,9 +1009,9 @@ function DataModal({ title, icon, accent, data, columns, onClose, searchPH, fold
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.25)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn .2s" }} onClick={onClose}>
-      <div style={{ background: "#FFF", borderRadius: 20, width: "90%", maxWidth: 1000, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.12)", animation: "slideUp .3s" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: "#FFF", borderRadius: 20, width: "92%", maxWidth: 1100, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.12)", animation: "slideUp .3s" }} onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div style={{ padding: "18px 26px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ padding: "22px 30px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
             <div style={{ width: 38, height: 38, borderRadius: 11, background: `${accent}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{icon}</div>
             <div>
@@ -6176,43 +6176,43 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background:#CBD5E1; border-radius:3px }
       `}</style>
 
-      <div style={{ background: "#FFF", borderBottom: "none", padding: "0 28px", height: 60, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-          <div style={{ width: 35, height: 35, borderRadius: 10, background: "#E8950A", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#FFF", fontFamily: "'Outfit', sans-serif" }}>PC</div>
+      <div style={{ background: "#FFF", borderBottom: "none", padding: "0 36px", height: 70, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: "#E8950A", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "#FFF", fontFamily: "'Outfit', sans-serif" }}>PC</div>
           <div>
-            <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: "-.02em" }}><span style={{ color: "#E8950A" }}>PEÑAS</span> <span style={{ color: "#1A1A1A" }}>CERCADAS</span></div>
-            <div style={{ fontSize: 9, color: "#A0A0A0", letterSpacing: ".1em", textTransform: "uppercase" }}>Sistema de Gestion Ganadera</div>
+            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-.02em" }}><span style={{ color: "#E8950A" }}>PEÑAS</span> <span style={{ color: "#1A1A1A" }}>CERCADAS</span></div>
+            <div style={{ fontSize: 10, color: "#A0A0A0", letterSpacing: ".1em", textTransform: "uppercase" }}>Sistema de Gestion Ganadera</div>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 2 }}>
+        <div style={{ display: "flex", gap: 4 }}>
           {NAV.map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
               background: page === item.id ? "#FFF8EE" : "transparent",
               border: "none",
-              borderRadius: 8, padding: "7px 14px", color: page === item.id ? "#1A1A1A" : "#999",
-              fontSize: 13, fontWeight: page === item.id ? 700 : 500, cursor: "pointer", fontFamily: "'Outfit', sans-serif",
+              borderRadius: 8, padding: "9px 16px", color: page === item.id ? "#1A1A1A" : "#999",
+              fontSize: 15, fontWeight: page === item.id ? 700 : 500, cursor: "pointer", fontFamily: "'Outfit', sans-serif",
             }}
               onMouseEnter={e => { if (page !== item.id) e.currentTarget.style.color = "#1A1A1A"; }}
               onMouseLeave={e => { if (page !== item.id) e.currentTarget.style.color = "#999"; }}
             >{item.label}</button>
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 11.5, color: "#94A3B8", fontFamily: "'Space Mono', monospace" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ fontSize: 14, color: "#64748B", fontFamily: "'Space Mono', monospace" }}>
             {time.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
           </div>
-          <div onClick={handleLogout} title="Cerrar sesión" style={{ width: 32, height: 32, borderRadius: 9, background: "#FEF9EE", border: "1px solid #FDE68A", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#E8950A", cursor: "pointer" }}>
+          <div onClick={handleLogout} title="Cerrar sesion" style={{ width: 36, height: 36, borderRadius: 10, background: "#FEF9EE", border: "1px solid #FDE68A", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#E8950A", cursor: "pointer" }}>
             {user.email?.charAt(0).toUpperCase()}
           </div>
         </div>
       </div>
 
-      <div style={{ padding: "22px 28px", maxWidth: 1360, margin: "0 auto" }}>
-        <div style={{ marginBottom: 22 }}>
-          <div style={{ fontSize: 23, fontWeight: 800, color: "#1E293B", letterSpacing: "-.02em" }}>
+      <div style={{ padding: "28px 36px", maxWidth: 1400, margin: "0 auto" }}>
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#1A1A1A", letterSpacing: "-.02em" }}>
             {{ dashboard: "Dashboard", produccion: "Producción & Análisis", sanidad: "Centro de Control Sanitario", rentabilidad: "Rentabilidad y Previsiones", importador: "Importador de Datos", consultas: "Consultas y Análisis", anomalias: "Control de Anomalías", guardados: "Chats Guardados", config: "Configuración" }[page]}
           </div>
-          <div style={{ fontSize: 12.5, color: "#94A3B8", marginTop: 3 }}>
+          <div style={{ fontSize: 15, color: "#64748B", marginTop: 5 }}>
             {{ dashboard: `Datos en vivo de Supabase · ${data.cabras.length} cabras · ${data.parideras.length} parideras`,
               produccion: `Análisis productivo · ${data.produccion?.length || 0} registros · Alertas sanitarias`,
               sanidad: "Alertas, patrones, conductividad, anotaciones veterinarias, candidatas a descarte",

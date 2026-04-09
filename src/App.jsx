@@ -3237,28 +3237,65 @@ function ImportadorPage({ data, refresh, saveChat }) {
     const detectedTreat = treatmentPatterns.find(tp => tp.keywords.some(k => msgLow.includes(k)));
     const loteMatch = msgLow.match(/lote\s*(\d+)/);
     
-    if (detectedTreat && loteMatch) {
-      const loteNum = loteMatch[1];
-      const lote = data.lotes.find(l => l.nombre && l.nombre.includes(`Lote ${loteNum}`));
-      
-      if (lote) {
-        const cabrasLote = data.cabras.filter(c => c.lote_id === lote.id);
-        const producto = userMsg.replace(/[Hh]e |[Aa]l |[Dd]el |[Ee]ntero |[Ee]ntera |[Tt]odo |[Tt]oda /g, "").trim();
-        const today = new Date().toISOString().split("T")[0];
-        
-        // Insert treatments for all cabras in the lote
-        let ok = 0, err = 0;
-        for (const c of cabrasLote) {
-          const { error } = await supabase.from("tratamiento").insert([{
-            cabra_id: c.id, fecha: today, tipo: detectedTreat.tipo, producto: producto,
-            notas: `Tratamiento masivo ${lote.nombre} — registrado desde chat`,
+    // Detect paridera mention: "paridera de mayo", "paridera mayo", "paridera de julio"
+    const parideraMatch = msgLow.match(/paridera\s*(?:de\s+)?(\w+)/);
+    let targetParidera = null;
+    let targetParideraId = null;
+    if (parideraMatch) {
+      const pName = parideraMatch[1];
+      targetParidera = data.parideras.find(function(p) { return p.nombre.toLowerCase().includes(pName); });
+      if (targetParidera) targetParideraId = targetParidera.id;
+    }
+
+    if (detectedTreat && (loteMatch || targetParidera)) {
+      // Determine which cabras to treat
+      var cabrasToTreat = [];
+      var targetLabel = "";
+      var assignParideraId = null;
+
+      if (targetParidera) {
+        // Get all cabras that were in cubricion for this paridera
+        var cubsCabras = data.cubriciones.filter(function(c) { return c.paridera_id === targetParidera.id; }).map(function(c) { return c.cabra_id; });
+        // Unique cabra IDs
+        var uniqueIds = [];
+        cubsCabras.forEach(function(id) { if (uniqueIds.indexOf(id) === -1) uniqueIds.push(id); });
+        cabrasToTreat = data.cabras.filter(function(c) { return uniqueIds.indexOf(c.id) !== -1; });
+        targetLabel = targetParidera.nombre;
+        assignParideraId = targetParidera.id;
+      }
+
+      if (loteMatch && cabrasToTreat.length === 0) {
+        var loteNum = loteMatch[1];
+        var lote = data.lotes.find(function(l) { return l.nombre && l.nombre.includes("Lote " + loteNum); });
+        if (lote) {
+          cabrasToTreat = data.cabras.filter(function(c) { return c.lote_id === lote.id; });
+          targetLabel = lote.nombre;
+          // Try to find paridera linked to this lote (check cubriciones)
+          if (!assignParideraId) {
+            var cubsForLote = data.cubriciones.filter(function(c) { return cabrasToTreat.some(function(cb) { return cb.id === c.cabra_id; }) && c.paridera_id; });
+            if (cubsForLote.length > 0) assignParideraId = cubsForLote[0].paridera_id;
+          }
+        }
+      }
+
+      if (cabrasToTreat.length > 0) {
+        var producto = userMsg.replace(/[Hh]e |[Aa]l |[Dd]el |[Ee]ntero |[Ee]ntera |[Tt]odo |[Tt]oda |[Ll]as |[Cc]abras /g, "").trim();
+        var today = new Date().toISOString().split("T")[0];
+
+        var ok = 0, errCount = 0;
+        for (var ti = 0; ti < cabrasToTreat.length; ti++) {
+          var resp = await supabase.from("tratamiento").insert([{
+            cabra_id: cabrasToTreat[ti].id, fecha: today, tipo: detectedTreat.tipo, producto: producto,
+            notas: "Tratamiento masivo " + targetLabel + " — registrado desde chat",
+            paridera_id: assignParideraId,
           }]);
-          if (error) err++;
+          if (resp.error) errCount++;
           else ok++;
         }
-        
+
         refresh();
-        setMs(p => [...p, { role: "assistant", text: `✅ **Registrado en la base de datos:**\n\n- **Tipo:** ${detectedTreat.tipo}\n- **Producto:** ${producto}\n- **Lote:** ${lote.nombre}\n- **Cabras tratadas:** ${ok}/${cabrasLote.length}\n- **Fecha:** ${today}${err > 0 ? `\n- ⚠️ ${err} errores` : ""}\n\nEsto queda guardado en el historial de cada cabra y se cruzará con los datos de producción y reproducción.` }]);
+        var parideraNombre = assignParideraId ? data.parideras.find(function(p) { return p.id === assignParideraId; })?.nombre || "" : "";
+        setMs(p => [...p, { role: "assistant", text: "**Registrado en la base de datos:**\n\n- **Tipo:** " + detectedTreat.tipo + "\n- **Producto:** " + producto + "\n- **Grupo:** " + targetLabel + (parideraNombre ? " (vinculado a " + parideraNombre + ")" : "") + "\n- **Cabras tratadas:** " + ok + "/" + cabrasToTreat.length + "\n- **Fecha:** " + today + (errCount > 0 ? "\n- " + errCount + " errores" : "") }]);
         setLd(false);
         return;
       }
